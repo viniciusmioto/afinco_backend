@@ -1,7 +1,9 @@
 package com.afinco.backend.api.error;
 
 import com.afinco.backend.exception.ConflictException;
+import com.afinco.backend.exception.AuthenticationFailedException;
 import com.afinco.backend.exception.InvalidRequestException;
+import com.afinco.backend.exception.LoginRateLimitException;
 import com.afinco.backend.exception.ResourceNotFoundException;
 import com.afinco.backend.exception.StatementParsingException;
 import com.afinco.backend.exception.UnsupportedStatementException;
@@ -15,6 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.convert.ConversionFailedException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindException;
@@ -34,6 +37,30 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(AuthenticationFailedException.class)
+    ResponseEntity<ApiErrorResponse> handleAuthenticationFailed(
+            AuthenticationFailedException exception, HttpServletRequest request) {
+        return response(HttpStatus.UNAUTHORIZED, exception.getMessage(), request, Map.of());
+    }
+
+    @ExceptionHandler(LoginRateLimitException.class)
+    ResponseEntity<ApiErrorResponse> handleLoginRateLimit(
+            LoginRateLimitException exception, HttpServletRequest request) {
+        long retryAfterSeconds = Math.max(1, exception.getRetryAfter().toSeconds());
+        HttpStatus status = HttpStatus.TOO_MANY_REQUESTS;
+        ApiErrorResponse error = new ApiErrorResponse(
+                Instant.now(),
+                status.value(),
+                status.getReasonPhrase(),
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of());
+        return ResponseEntity.status(status)
+                .header(HttpHeaders.RETRY_AFTER, Long.toString(retryAfterSeconds))
+                .cacheControl(CacheControl.noStore())
+                .body(error);
+    }
 
     @ExceptionHandler(UnsupportedStatementException.class)
     ResponseEntity<ApiErrorResponse> handleUnsupportedStatement(

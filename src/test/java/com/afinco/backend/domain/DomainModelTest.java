@@ -21,6 +21,18 @@ class DomainModelTest {
     }
 
     @Test
+    void normalizesUserEmailAndRequiresBcryptHash() {
+        AppUser user = new AppUser(
+                "  Test@Example.COM ",
+                "$2a$12$9fgMDPBPa4uXj7rW8WNGIuO.vvEIR2FmRX8yNt1xIzFD535.4MfRa");
+
+        assertThat(user.getEmail()).isEqualTo("test@example.com");
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new AppUser("test@example.com", "plain text"))
+                .withMessageContaining("BCrypt");
+    }
+
+    @Test
     void rejectsInvalidAccountNumberSuffix() {
         assertThatIllegalArgumentException()
                 .isThrownBy(() -> new Account("TD Bank", "12A4", "CAD"))

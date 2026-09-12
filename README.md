@@ -5,9 +5,10 @@ SQLite, Flyway, and Spring Data JPA.
 
 ## Project status
 
-Working today: TD credit-card statement upload and parsing, SHA-256 duplicate
+Working today: SQLite-backed email/password authentication, hardened server-side
+sessions, TD credit-card statement upload and parsing, SHA-256 duplicate
 detection, single and batched transaction persistence, duplicate resolution,
-transaction filtering, and account/category lookups. 115 tests pass under
+transaction filtering, and account/category lookups. 236 tests pass under
 `mvn clean verify`.
 
 The companion UI lives in the separate [afinco_frontend](https://github.com/viniciusmioto/afinco_frontend)
@@ -44,9 +45,26 @@ Ordered roughly by how much each one blocks real use.
 8. **Scanned and encrypted PDFs.** OCR is not implemented, and statements that
    require a password to open are rejected. Owner-encrypted PDFs that open
    without a password and allow text extraction do work.
-9. **Authentication.** Intentionally absent — the MVP is single-user on a
-   trusted LAN. Anything exposed beyond `miopiaz` would need an auth layer
-   first.
+
+## Authentication
+
+Every finance endpoint requires a server-side session. The two public auth
+operations initialize CSRF protection and establish the session; the current
+user and logout operations require it:
+
+- `GET /api/v1/auth/csrf`
+- `POST /api/v1/auth/login`
+- `GET /api/v1/auth/me`
+- `POST /api/v1/auth/logout`
+
+The initial local test user is `test@test.com` with password `123@Test`. The
+password is stored only as a BCrypt cost-12 hash in SQLite. It is a temporary,
+publicly documented credential and must be replaced before exposing Afinco to
+an untrusted network.
+
+See [Authentication architecture](docs/authentication.md) for endpoint
+contracts, CSRF/session behavior, the SQLite schema, threat boundaries,
+credential rotation guidance, and the `miopiaz` deployment checklist.
 
 ## Run with Docker
 
@@ -189,13 +207,15 @@ client-supplied hashes are not automatically rehashed.
 In Insomnia, create a POST request to `http://localhost:8080/api/v1/statements/upload`.
 Select **Multipart Form**, add a field named `file`, change its type to **File**,
 and select your local PDF. Add a text field named `statementType` with the value
-`CREDIT_CARD`. No authorization is required.
+`CREDIT_CARD`. An authenticated session and CSRF header are required.
 Let Insomnia generate the multipart Content-Type boundary. Example using a
 placeholder path (replace it with your private local file):
 
 ```shell
 curl --request POST 'http://localhost:8080/api/v1/statements/upload' \
   --header 'Accept: application/json' \
+  --header 'X-XSRF-TOKEN: <token-from-auth-csrf>' \
+  --cookie '<cookies-from-login>' \
   --form 'statementType=CREDIT_CARD' \
   --form 'file=@/absolute/path/to/statement.pdf;type=application/pdf'
 ```

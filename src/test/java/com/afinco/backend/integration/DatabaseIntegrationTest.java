@@ -3,11 +3,13 @@ package com.afinco.backend.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.afinco.backend.domain.Account;
+import com.afinco.backend.domain.AppUser;
 import com.afinco.backend.domain.Category;
 import com.afinco.backend.domain.Transaction;
 import com.afinco.backend.domain.TransactionStatus;
 import com.afinco.backend.domain.TransactionType;
 import com.afinco.backend.repository.AccountRepository;
+import com.afinco.backend.repository.UserRepository;
 import com.afinco.backend.repository.CategoryRepository;
 import com.afinco.backend.repository.TransactionRepository;
 import com.afinco.backend.repository.projection.CategoryAggregation;
@@ -31,6 +33,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 @SpringBootTest
 class DatabaseIntegrationTest {
@@ -63,6 +66,12 @@ class DatabaseIntegrationTest {
     private TransactionRepository transactionRepository;
 
     @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
     private EntityManager entityManager;
 
     @Test
@@ -83,7 +92,7 @@ class DatabaseIntegrationTest {
         List<String> categories = jdbcTemplate.queryForList(
                 "SELECT name FROM categories ORDER BY id", String.class);
 
-        assertThat(tables).contains("accounts", "categories", "transactions", "flyway_schema_history");
+        assertThat(tables).contains("accounts", "categories", "transactions", "users", "flyway_schema_history");
         assertThat(categories).containsExactly(
                 "Payment",
                 "Subscriptions",
@@ -95,6 +104,15 @@ class DatabaseIntegrationTest {
                 "Pharmacy & Health",
                 "Electricity & Water",
                 "Occasional");
+    }
+
+    @Test
+    void flywaySeedsBcryptProtectedTestUser() {
+        AppUser user = userRepository.findByEmail("test@test.com").orElseThrow();
+
+        assertThat(user.getPasswordHash()).doesNotContain("123@Test");
+        assertThat(passwordEncoder.matches("123@Test", user.getPasswordHash())).isTrue();
+        assertThat(user.isEnabled()).isTrue();
     }
 
     @Test
