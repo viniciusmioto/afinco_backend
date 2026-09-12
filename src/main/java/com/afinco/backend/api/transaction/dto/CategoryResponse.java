@@ -1,4 +1,6 @@
 package com.afinco.backend.api.transaction.dto;
 
-public record CategoryResponse(Long id, String name, String colorCode) {
+import com.afinco.backend.domain.ExpenseType;
+
+public record CategoryResponse(Long id, String name, ExpenseType expenseType, String colorCode) {
 }

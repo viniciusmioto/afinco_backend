@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 public class CategoryMapper {
 
     public CategoryResponse toResponse(Category category) {
-        return new CategoryResponse(category.getId(), category.getName(), category.getColorCode());
+        return new CategoryResponse(
+                category.getId(), category.getName(), category.getExpenseType(), category.getColorCode());
     }
 }

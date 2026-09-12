@@ -57,7 +57,7 @@ class StatementWorkflowIntegrationTest {
                 transaction -> assertThat(transaction.type()).isEqualTo(com.afinco.backend.domain.TransactionType.CREDIT));
         assertThat(repository.count()).isZero();
         var account = accounts.save(new Account("TD Canada Trust", "1234", "CAD"));
-        var category = categories.findByName("Uncategorized").orElseThrow();
+        var category = categories.findByName("Occasional").orElseThrow();
         var row = preview.transactions().getFirst();
         var request = new TransactionCreateRequest(account.getId(), category.getId(), row.date(),
                 row.amount(), row.type(), row.description(), "f".repeat(64), null);

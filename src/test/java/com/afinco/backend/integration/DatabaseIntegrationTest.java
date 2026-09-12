@@ -85,14 +85,16 @@ class DatabaseIntegrationTest {
 
         assertThat(tables).contains("accounts", "categories", "transactions", "flyway_schema_history");
         assertThat(categories).containsExactly(
+                "Payment",
+                "Subscriptions",
+                "Phone / Internet",
+                "Transport",
+                "Rent",
                 "Groceries",
-                "Transportation",
-                "Housing & Rent",
-                "Utilities",
-                "Leisure & Entertainment",
-                "Education",
-                "Income",
-                "Uncategorized");
+                "Food & Leisure",
+                "Pharmacy & Health",
+                "Electricity & Water",
+                "Occasional");
     }
 
     @Test
@@ -130,7 +132,7 @@ class DatabaseIntegrationTest {
         Account selectedAccount = accountRepository.save(new Account("TD Bank", "1234", "CAD"));
         Account otherAccount = accountRepository.save(new Account("RBC", "5678", "CAD"));
         Category groceries = categoryRepository.findByName("Groceries").orElseThrow();
-        Category utilities = categoryRepository.findByName("Utilities").orElseThrow();
+        Category utilities = categoryRepository.findByName("Occasional").orElseThrow();
         transactionRepository.saveAll(List.of(
                 transaction(selectedAccount, groceries, "42.35", "1", TransactionStatus.CONFIRMED),
                 transaction(selectedAccount, utilities, "18.20", "2", TransactionStatus.CONFIRMED),

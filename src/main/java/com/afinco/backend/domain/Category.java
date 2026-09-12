@@ -2,10 +2,13 @@ package com.afinco.backend.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.util.Objects;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -23,11 +26,16 @@ public class Category {
     @Column(nullable = false, unique = true, length = 100)
     private String name;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "expense_type", nullable = false, length = 20)
+    private ExpenseType expenseType;
+
     @Column(name = "color_code", nullable = false, length = 7)
     private String colorCode;
 
-    public Category(String name, String colorCode) {
+    public Category(String name, ExpenseType expenseType, String colorCode) {
         this.name = requireText(name);
+        this.expenseType = Objects.requireNonNull(expenseType, "Expense type must not be null");
         this.colorCode = requireHexColor(colorCode);
     }
 

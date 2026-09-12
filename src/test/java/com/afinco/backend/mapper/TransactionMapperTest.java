@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.afinco.backend.api.transaction.dto.TransactionCreateRequest;
 import com.afinco.backend.api.transaction.dto.TransactionResponse;
 import com.afinco.backend.domain.Account;
+import com.afinco.backend.domain.ExpenseType;
 import com.afinco.backend.domain.Category;
 import com.afinco.backend.domain.Transaction;
 import com.afinco.backend.domain.TransactionStatus;
@@ -20,7 +21,7 @@ class TransactionMapperTest {
     @Test
     void mapsRequestToEntityAndEntityToResponse() {
         Account account = new Account("TD Bank", "1234", "CAD");
-        Category category = new Category("Groceries", "#2563EB");
+        Category category = new Category("Groceries", ExpenseType.VARIABLE, "#2563EB");
         TransactionCreateRequest request = new TransactionCreateRequest(
                 1L,
                 2L,

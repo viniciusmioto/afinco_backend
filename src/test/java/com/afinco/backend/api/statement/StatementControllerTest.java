@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.afinco.backend.api.statement.dto.ParsedTransactionResponse;
 import com.afinco.backend.api.statement.dto.StatementUploadResponse;
+import com.afinco.backend.domain.ExpenseType;
 import com.afinco.backend.domain.TransactionStatus;
 import com.afinco.backend.domain.TransactionType;
 import com.afinco.backend.exception.InvalidRequestException;
@@ -47,7 +48,8 @@ class StatementControllerTest {
     void returnsStructuredPreviewWithDuplicateFlagsAndNoStore() throws Exception {
         ParsedTransactionResponse transaction = new ParsedTransactionResponse(
                 LocalDate.of(2026, 1, 15), new BigDecimal("18.50"), TransactionType.CREDIT,
-                "Synthetic Market", "TD Bank", "a".repeat(64), TransactionStatus.DUPLICATE_PENDING, true);
+                "Synthetic Market", "TD Bank", "a".repeat(64), TransactionStatus.DUPLICATE_PENDING, true,
+                ExpenseType.OCCASIONAL, "Occasional");
         when(service.parse(PDF_BYTES, StatementType.CREDIT_CARD)).thenReturn(
                 new StatementUploadResponse("TD Bank", 1, 1, new BigDecimal("18.50"), List.of(transaction)));
 

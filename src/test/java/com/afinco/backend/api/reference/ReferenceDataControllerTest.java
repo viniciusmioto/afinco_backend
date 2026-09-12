@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import com.afinco.backend.api.transaction.dto.AccountResponse;
 import com.afinco.backend.api.transaction.dto.CategoryResponse;
+import com.afinco.backend.domain.ExpenseType;
 import com.afinco.backend.service.ReferenceDataService;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -39,7 +40,7 @@ class ReferenceDataControllerTest {
     @Test
     void listsCategories() throws Exception {
         when(referenceDataService.findCategories())
-                .thenReturn(List.of(new CategoryResponse(2L, "Groceries", "#2563EB")));
+                .thenReturn(List.of(new CategoryResponse(2L, "Groceries", ExpenseType.VARIABLE, "#2563EB")));
 
         mockMvc.perform(get("/api/v1/categories"))
                 .andExpect(status().isOk())

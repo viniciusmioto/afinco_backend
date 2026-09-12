@@ -17,6 +17,7 @@ import com.afinco.backend.api.transaction.dto.TransactionBatchResponse;
 import com.afinco.backend.api.transaction.dto.TransactionCreateRequest;
 import com.afinco.backend.api.transaction.dto.TransactionResponse;
 import com.afinco.backend.domain.Account;
+import com.afinco.backend.domain.ExpenseType;
 import com.afinco.backend.domain.Category;
 import com.afinco.backend.domain.Transaction;
 import com.afinco.backend.domain.TransactionStatus;
@@ -73,7 +74,7 @@ class DefaultTransactionServiceBatchTest {
         service = new DefaultTransactionService(
                 transactionRepository, accountRepository, categoryRepository, transactionMapper, signatureService);
         account = withId(new Account("TD Bank", "2048", "CAD"), 4L);
-        category = withId(new Category("Groceries", "#2563EB"), 7L);
+        category = withId(new Category("Groceries", ExpenseType.VARIABLE, "#2563EB"), 7L);
         when(accountRepository.findById(4L)).thenReturn(Optional.of(account));
         when(categoryRepository.findAllById(any())).thenReturn(List.of(category));
         when(transactionMapper.toEntity(any(), any(), any(), any(), any()))
@@ -232,7 +233,7 @@ class DefaultTransactionServiceBatchTest {
         return new TransactionResponse(
                 9L,
                 new AccountResponse(4L, "TD Bank", "2048", "CAD"),
-                new CategoryResponse(7L, "Groceries", "#2563EB"),
+                new CategoryResponse(7L, "Groceries", ExpenseType.VARIABLE, "#2563EB"),
                 LocalDate.of(2026, 9, 11),
                 new BigDecimal("42.35"),
                 TransactionType.CREDIT,

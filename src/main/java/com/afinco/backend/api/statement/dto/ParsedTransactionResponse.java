@@ -1,5 +1,6 @@
 package com.afinco.backend.api.statement.dto;
 
+import com.afinco.backend.domain.ExpenseType;
 import com.afinco.backend.domain.TransactionStatus;
 import com.afinco.backend.domain.TransactionType;
 import java.math.BigDecimal;
@@ -13,5 +14,7 @@ public record ParsedTransactionResponse(
         String bankName,
         String hashSignature,
         TransactionStatus status,
-        boolean duplicate) {
+        boolean duplicate,
+        ExpenseType expenseType,
+        String categoryName) {
 }

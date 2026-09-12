@@ -14,7 +14,7 @@ class DomainModelTest {
     @Test
     void normalizesAccountCurrencyAndCategoryColor() {
         Account account = new Account("TD Bank", "1234", "cad");
-        Category category = new Category("Groceries", "#a1b2c3");
+        Category category = new Category("Groceries", ExpenseType.VARIABLE, "#a1b2c3");
 
         assertThat(account.getCurrency()).isEqualTo("CAD");
         assertThat(category.getColorCode()).isEqualTo("#A1B2C3");
@@ -30,7 +30,7 @@ class DomainModelTest {
     @Test
     void rejectsNegativeTransactionAmount() {
         Account account = new Account("TD Bank", "1234", "CAD");
-        Category category = new Category("Groceries", "#2563EB");
+        Category category = new Category("Groceries", ExpenseType.VARIABLE, "#2563EB");
 
         assertThatIllegalArgumentException()
                 .isThrownBy(() -> new Transaction(
@@ -49,7 +49,7 @@ class DomainModelTest {
     @Test
     void rejectsMalformedTransactionSignature() {
         Account account = new Account("RBC", "5678", "CAD");
-        Category category = new Category("Income", "#16A34A");
+        Category category = new Category("Income", ExpenseType.VARIABLE, "#16A34A");
 
         assertThatIllegalArgumentException()
                 .isThrownBy(() -> new Transaction(
@@ -69,7 +69,7 @@ class DomainModelTest {
     void confirmsPendingDuplicate() {
         Transaction transaction = new Transaction(
                 new Account("RBC", "5678", "CAD"),
-                new Category("Income", "#16A34A"),
+                new Category("Income", ExpenseType.VARIABLE, "#16A34A"),
                 LocalDate.of(2026, 9, 11),
                 new BigDecimal("100.00"),
                 TransactionType.CREDIT,

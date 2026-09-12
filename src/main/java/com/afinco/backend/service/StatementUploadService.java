@@ -2,10 +2,12 @@ package com.afinco.backend.service;
 
 import com.afinco.backend.api.statement.dto.ParsedTransactionResponse;
 import com.afinco.backend.api.statement.dto.StatementUploadResponse;
+import com.afinco.backend.domain.ExpenseType;
 import com.afinco.backend.domain.TransactionStatus;
 import com.afinco.backend.domain.TransactionType;
 import com.afinco.backend.exception.InvalidRequestException;
 import com.afinco.backend.repository.TransactionRepository;
+import com.afinco.backend.service.TransactionCategorizationService.Categorization;
 import com.afinco.backend.statement.PdfTextExtractor;
 import com.afinco.backend.statement.StatementParser;
 import com.afinco.backend.statement.StatementParserFactory;
@@ -35,16 +37,19 @@ public class StatementUploadService {
     private final StatementParserFactory parserFactory;
     private final TransactionSignatureService signatureService;
     private final TransactionRepository transactionRepository;
+    private final TransactionCategorizationService categorizationService;
 
     public StatementUploadService(
             PdfTextExtractor textExtractor,
             StatementParserFactory parserFactory,
             TransactionSignatureService signatureService,
-            TransactionRepository transactionRepository) {
+            TransactionRepository transactionRepository,
+            TransactionCategorizationService categorizationService) {
         this.textExtractor = textExtractor;
         this.parserFactory = parserFactory;
         this.signatureService = signatureService;
         this.transactionRepository = transactionRepository;
+        this.categorizationService = categorizationService;
     }
 
     public StatementUploadResponse parse(byte[] pdfBytes, StatementType statementType) {
@@ -67,8 +72,8 @@ public class StatementUploadService {
             transactions.add(toResponse(signed, duplicate));
         }
 
-        BigDecimal total = signedTransactions.stream()
-                .map(signed -> signed.transaction().amount())
+        BigDecimal total = transactions.stream()
+                .map(ParsedTransactionResponse::amount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         return new StatementUploadResponse(
                 parser.bankName(), transactions.size(), duplicateCount, total, transactions);
@@ -103,11 +108,17 @@ public class StatementUploadService {
 
     private ParsedTransactionResponse toResponse(SignedTransaction signed, boolean duplicate) {
         ParsedTransactionDTO transaction = signed.transaction();
+        Categorization categorization = categorizationService.categorize(transaction.description());
+        BigDecimal signedAmount = categorization.expenseType() == ExpenseType.PAYMENT
+                ? transaction.amount().negate()
+                : transaction.amount();
         return new ParsedTransactionResponse(
-                transaction.date(), transaction.amount(), transaction.type(), transaction.description(),
+                transaction.date(), signedAmount, transaction.type(), transaction.description(),
                 transaction.bankName(), signed.hashSignature(),
                 duplicate ? TransactionStatus.DUPLICATE_PENDING : TransactionStatus.CONFIRMED,
-                duplicate);
+                duplicate,
+                categorization.expenseType(),
+                categorization.categoryName());
     }
 
     private ParsedTransactionDTO assignType(ParsedTransactionDTO transaction, StatementType statementType) {

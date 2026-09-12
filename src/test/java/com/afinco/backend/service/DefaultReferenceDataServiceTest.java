@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import com.afinco.backend.api.transaction.dto.AccountResponse;
 import com.afinco.backend.api.transaction.dto.CategoryResponse;
 import com.afinco.backend.domain.Account;
+import com.afinco.backend.domain.ExpenseType;
 import com.afinco.backend.domain.Category;
 import com.afinco.backend.mapper.AccountMapper;
 import com.afinco.backend.mapper.CategoryMapper;
@@ -55,12 +56,12 @@ class DefaultReferenceDataServiceTest {
 
     @Test
     void mapsSortedCategoriesToResponses() {
-        Category category = new Category("Groceries", "#2563EB");
+        Category category = new Category("Groceries", ExpenseType.VARIABLE, "#2563EB");
         when(categoryRepository.findAll(any(Sort.class))).thenReturn(List.of(category));
-        when(categoryMapper.toResponse(category)).thenReturn(new CategoryResponse(2L, "Groceries", "#2563EB"));
+        when(categoryMapper.toResponse(category)).thenReturn(new CategoryResponse(2L, "Groceries", ExpenseType.VARIABLE, "#2563EB"));
 
         assertThat(service.findCategories())
-                .containsExactly(new CategoryResponse(2L, "Groceries", "#2563EB"));
+                .containsExactly(new CategoryResponse(2L, "Groceries", ExpenseType.VARIABLE, "#2563EB"));
     }
 
     @Test

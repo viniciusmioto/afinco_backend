@@ -56,11 +56,12 @@ class StatementUploadServiceTest {
     private StatementUploadService service;
 
     private final TransactionSignatureService signatureService = new TransactionSignatureService();
+    private final TransactionCategorizationService categorizationService = new TransactionCategorizationService();
 
     @BeforeEach
     void setUp() {
         service = new StatementUploadService(
-                textExtractor, parserFactory, signatureService, transactionRepository);
+                textExtractor, parserFactory, signatureService, transactionRepository, categorizationService);
     }
 
     @Test

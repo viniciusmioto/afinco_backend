@@ -16,6 +16,7 @@ import com.afinco.backend.api.transaction.dto.TransactionCreateRequest;
 import com.afinco.backend.api.transaction.dto.TransactionFilterRequest;
 import com.afinco.backend.api.transaction.dto.TransactionResponse;
 import com.afinco.backend.domain.Account;
+import com.afinco.backend.domain.ExpenseType;
 import com.afinco.backend.domain.Category;
 import com.afinco.backend.domain.Transaction;
 import com.afinco.backend.domain.TransactionStatus;
@@ -245,14 +246,14 @@ class DefaultTransactionServiceTest {
     }
 
     private Category category() {
-        return new Category("Groceries", "#2563EB");
+        return new Category("Groceries", ExpenseType.VARIABLE, "#2563EB");
     }
 
     private TransactionResponse response(TransactionStatus status) {
         return new TransactionResponse(
                 9L,
                 new AccountResponse(1L, "TD Bank", "1234", "CAD"),
-                new CategoryResponse(2L, "Groceries", "#2563EB"),
+                new CategoryResponse(2L, "Groceries", ExpenseType.VARIABLE, "#2563EB"),
                 LocalDate.of(2026, 9, 11),
                 new BigDecimal("42.35"),
                 TransactionType.DEBIT,
