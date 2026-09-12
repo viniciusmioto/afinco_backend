@@ -1,0 +1,24 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: afinco-backend:local
+    container_name: afinco-backend
+    restart: unless-stopped
+    environment:
+      AFINCO_DATABASE_PATH: /data/afinco.db
+    ports:
+      - "8080:8080"
+    volumes:
+      - afinco-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,exec,nosuid,size=64m,mode=1777
+    mem_limit: 512m
+    cpus: 1.0
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  afinco-data:
