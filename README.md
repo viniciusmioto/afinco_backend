@@ -10,7 +10,8 @@ sessions, account creation, TD credit-card statement upload and parsing
 (including the statement period), SHA-256 duplicate detection, automatic
 expense-type/category suggestions, persisted statements that own their imported
 transactions, manual transactions, duplicate resolution, statement- and
-month-scoped transaction queries, and account/category lookups. 269 tests pass
+month-scoped transaction queries, a full transaction-data reset, and
+account/category lookups. 275 tests pass
 under `mvn clean verify`, and the build, test run, and application startup emit
 no warnings on Java 21 through 26.
 
@@ -26,10 +27,10 @@ Ordered roughly by how much each one blocks real use.
    planned dashboards have no data source. This query is currently dead code.
 2. **Account maintenance.** `POST /api/v1/accounts` creates an account, but
    there is no update or delete endpoint yet.
-3. **Statement deletion.** An import can be extended by re-importing the same
-   period, but there is no `DELETE /api/v1/statements/{id}` to undo a whole
-   import. Transactions and statements use `ON DELETE RESTRICT`, so this needs
-   an explicit service that removes a statement's rows first.
+3. **Single-statement deletion.** Everything can be reset at once (see
+   **Transaction data reset**), but there is no `DELETE /api/v1/statements/{id}`
+   to undo one import. Transactions and statements use `ON DELETE RESTRICT`, so
+   this needs a service that removes that statement's rows first.
 4. **Checking-account parser.** `StatementType.CHECKING_ACCOUNT` is accepted and
    validated but `StatementParserFactory` has no strategy for it, so those
    uploads return `422`. Rows from it are meant to be typed `DEBIT`.
@@ -149,6 +150,26 @@ form that calls `POST /api/v1/accounts` before saving.
 
 Unknown API routes return a structured `404`, and an unsupported HTTP method on
 a known route returns `405`, instead of falling through to the generic `500`.
+
+## Transaction data reset
+
+Transaction data is every transaction (imported or manual) plus every imported
+statement. Accounts, categories, and users are reference data and are never
+part of it.
+
+- `GET /api/v1/transaction-data` returns
+  `{ "transactionCount": 251, "statementCount": 7 }` so a client can show what a
+  reset would remove.
+- `DELETE /api/v1/transaction-data` permanently deletes all transactions and
+  then all statements in one database transaction and returns
+  `{ "deletedTransactions": 251, "deletedStatements": 7 }`. The same statements
+  can be imported again immediately as new statements without duplicate flags.
+
+The reset is a separate resource rather than a collection-wide `DELETE` on
+`/api/v1/transactions`, so a malformed per-transaction delete can never reach it.
+Like every write it needs a session and a CSRF token, and each reset is logged
+at `INFO` with its counts. The UI puts it behind the account menu and a
+confirmation dialog.
 
 ## Statements
 
