@@ -73,7 +73,7 @@ public class StatementUploadService {
         }
 
         BigDecimal total = transactions.stream()
-                .map(ParsedTransactionResponse::amount)
+                .map(this::signedAmountForTotal)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         return new StatementUploadResponse(
                 parser.bankName(), transactions.size(), duplicateCount, total, transactions);
@@ -109,16 +109,19 @@ public class StatementUploadService {
     private ParsedTransactionResponse toResponse(SignedTransaction signed, boolean duplicate) {
         ParsedTransactionDTO transaction = signed.transaction();
         Categorization categorization = categorizationService.categorize(transaction.description());
-        BigDecimal signedAmount = categorization.expenseType() == ExpenseType.PAYMENT
-                ? transaction.amount().negate()
-                : transaction.amount();
         return new ParsedTransactionResponse(
-                transaction.date(), signedAmount, transaction.type(), transaction.description(),
+                transaction.date(), transaction.amount(), transaction.type(), transaction.description(),
                 transaction.bankName(), signed.hashSignature(),
                 duplicate ? TransactionStatus.DUPLICATE_PENDING : TransactionStatus.CONFIRMED,
                 duplicate,
                 categorization.expenseType(),
                 categorization.categoryName());
+    }
+
+    private BigDecimal signedAmountForTotal(ParsedTransactionResponse transaction) {
+        return transaction.expenseType() == ExpenseType.PAYMENT
+                ? transaction.amount().negate()
+                : transaction.amount();
     }
 
     private ParsedTransactionDTO assignType(ParsedTransactionDTO transaction, StatementType statementType) {

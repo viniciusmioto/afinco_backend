@@ -21,7 +21,9 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -89,21 +91,25 @@ class DatabaseIntegrationTest {
     void flywayCreatesSchemaAndSeedsCategories() {
         Set<String> tables = Set.copyOf(jdbcTemplate.queryForList(
                 "SELECT name FROM sqlite_master WHERE type = 'table'", String.class));
-        List<String> categories = jdbcTemplate.queryForList(
-                "SELECT name FROM categories ORDER BY id", String.class);
+        Map<String, String> categories = jdbcTemplate.query(
+                "SELECT name, expense_type FROM categories",
+                (resultSet, rowNumber) -> Map.entry(
+                        resultSet.getString("name"), resultSet.getString("expense_type")))
+                .stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
         assertThat(tables).contains("accounts", "categories", "transactions", "users", "flyway_schema_history");
-        assertThat(categories).containsExactly(
-                "Payment",
-                "Subscriptions",
-                "Phone / Internet",
-                "Transport",
-                "Rent",
-                "Groceries",
-                "Food & Leisure",
-                "Pharmacy & Health",
-                "Electricity & Water",
-                "Occasional");
+        assertThat(categories).containsExactlyInAnyOrderEntriesOf(Map.ofEntries(
+                Map.entry("Payment", "PAYMENT"),
+                Map.entry("Subscriptions", "FIXED"),
+                Map.entry("Phone / Internet", "FIXED"),
+                Map.entry("Transport", "FIXED"),
+                Map.entry("Rent", "FIXED"),
+                Map.entry("Groceries", "VARIABLE"),
+                Map.entry("Food & Leisure", "VARIABLE"),
+                Map.entry("Pharmacy & Health", "VARIABLE"),
+                Map.entry("Electricity & Water", "VARIABLE"),
+                Map.entry("Occasional", "OCCASIONAL")));
     }
 
     @Test

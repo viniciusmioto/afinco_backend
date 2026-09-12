@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.afinco.backend.api.statement.dto.StatementUploadResponse;
+import com.afinco.backend.domain.ExpenseType;
 import com.afinco.backend.domain.TransactionStatus;
 import com.afinco.backend.domain.TransactionType;
 import com.afinco.backend.exception.InvalidRequestException;
@@ -67,7 +68,7 @@ class StatementUploadServiceTest {
     @Test
     void returnsParsedTransactionsWithDatabaseDuplicateFlagsWithoutSaving() {
         ParsedTransactionDTO purchase = transaction("Synthetic Market", "18.50");
-        ParsedTransactionDTO payment = transaction("Synthetic Payment", "70.00");
+        ParsedTransactionDTO payment = transaction("PAYMENT - THANK YOU", "70.00");
         prepareParser(List.of(purchase, payment));
         String existingHash = signature(payment);
         when(transactionRepository.findExistingHashSignatures(any())).thenReturn(Set.of(existingHash));
@@ -77,7 +78,7 @@ class StatementUploadServiceTest {
         assertThat(result.bankName()).isEqualTo(BANK_NAME);
         assertThat(result.transactionCount()).isEqualTo(2);
         assertThat(result.duplicateCount()).isEqualTo(1);
-        assertThat(result.total()).isEqualByComparingTo("88.50");
+        assertThat(result.total()).isEqualByComparingTo("-51.50");
         assertThat(result.transactions()).allSatisfy(
                 transaction -> assertThat(transaction.type()).isEqualTo(TransactionType.CREDIT));
         assertThat(result.transactions().getFirst().description()).isEqualTo("Synthetic Market");
@@ -86,6 +87,9 @@ class StatementUploadServiceTest {
         assertThat(result.transactions().getLast().hashSignature()).isEqualTo(existingHash);
         assertThat(result.transactions().getLast().status()).isEqualTo(TransactionStatus.DUPLICATE_PENDING);
         assertThat(result.transactions().getLast().duplicate()).isTrue();
+        assertThat(result.transactions().getLast().amount()).isEqualByComparingTo("70.00");
+        assertThat(result.transactions().getLast().expenseType()).isEqualTo(ExpenseType.PAYMENT);
+        assertThat(result.transactions().getLast().categoryName()).isEqualTo("Payment");
         verify(transactionRepository).findExistingHashSignatures(List.of(signature(purchase), existingHash));
         org.mockito.Mockito.verifyNoMoreInteractions(transactionRepository);
     }

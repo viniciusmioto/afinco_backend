@@ -7,8 +7,9 @@ SQLite, Flyway, and Spring Data JPA.
 
 Working today: SQLite-backed email/password authentication, hardened server-side
 sessions, TD credit-card statement upload and parsing, SHA-256 duplicate
-detection, single and batched transaction persistence, duplicate resolution,
-transaction filtering, and account/category lookups. 236 tests pass under
+detection, automatic expense-type/category suggestions, single and batched
+transaction persistence, duplicate resolution, transaction filtering, and
+account/category lookups. 237 tests pass under
 `mvn clean verify`.
 
 The companion UI lives in the separate [afinco_frontend](https://github.com/viniciusmioto/afinco_frontend)
@@ -31,9 +32,9 @@ Ordered roughly by how much each one blocks real use.
    uploads return `422`. Rows from it are meant to be typed `DEBIT`.
 4. **RBC parser.** The factory registers TD only. RBC was intended as the second
    supported institution.
-5. **Category management.** The eight default categories are inserted by
-   `V1__init_schema.sql` and can only be changed by editing the database.
-   Custom user categories need create/update/delete endpoints.
+5. **Category management.** The ten current categories are evolved and seeded by
+   `V2__categorization_model.sql` and can only be changed by editing the
+   database. Custom user categories need create/update/delete endpoints.
 6. **Transaction editing.** Only create, batch-create, resolve-duplicate, and
    delete exist. There is no `PUT`/`PATCH`, so correcting a wrong category or
    amount means deleting and re-creating the row.
@@ -181,9 +182,12 @@ Uploads are limited to 10 MiB and 100 pages. Dates use the transaction date (not
 posting date), with the statement date used to resolve year rollover.
 
 The response contains `bankName`, `transactionCount`, `duplicateCount`, `total`,
-and a `transactions` list. `total` is the sum of every returned transaction amount.
-Each item includes `date`, positive `amount`, `type`,
-`description`, `bankName`, `hashSignature`, `status`, and `duplicate`.
+and a `transactions` list. `total` is net activity: payment-category rows
+reduce it while purchases increase it. Each item keeps a positive `amount` so
+it satisfies the persistence contract and also includes `date`, `type`,
+`description`, `bankName`, `hashSignature`, `status`, `duplicate`,
+`expenseType`, and the suggested `categoryName`. The review UI maps that name
+to the real category id before batch persistence.
 Every transaction from a credit-card statement is assigned `CREDIT`. When
 checking-account parsing is added, every transaction from that statement type
 will be assigned `DEBIT`.
@@ -203,6 +207,10 @@ handles Unicode, case and whitespace. `TD`, `TD Canada Trust`, and `TD Bank` sha
 one bank identity. Type is intentionally excluded per the signature contract;
 matches are review candidates, not automatic deletions. Existing rows with older
 client-supplied hashes are not automatically rehashed.
+
+Flyway V2 renames compatible V1 categories in place and removes obsolete,
+unreferenced seeds only. Referenced legacy categories and their transaction
+foreign keys are preserved during upgrades.
 
 In Insomnia, create a POST request to `http://localhost:8080/api/v1/statements/upload`.
 Select **Multipart Form**, add a field named `file`, change its type to **File**,
