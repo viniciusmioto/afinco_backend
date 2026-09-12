@@ -3,7 +3,6 @@ package com.afinco.backend.api.transaction;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -17,12 +16,12 @@ import com.afinco.backend.api.transaction.dto.AccountResponse;
 import com.afinco.backend.api.transaction.dto.CategoryResponse;
 import com.afinco.backend.api.transaction.dto.DuplicateResolutionRequest;
 import com.afinco.backend.api.transaction.dto.PageResponse;
-import com.afinco.backend.api.transaction.dto.TransactionBatchItemRequest;
-import com.afinco.backend.api.transaction.dto.TransactionBatchRequest;
-import com.afinco.backend.api.transaction.dto.TransactionBatchResponse;
 import com.afinco.backend.api.transaction.dto.TransactionCreateRequest;
 import com.afinco.backend.api.transaction.dto.TransactionFilterRequest;
+import com.afinco.backend.api.transaction.dto.TransactionMonthResponse;
 import com.afinco.backend.api.transaction.dto.TransactionResponse;
+import com.afinco.backend.api.statement.dto.StatementSummaryResponse;
+import com.afinco.backend.domain.StatementType;
 import com.afinco.backend.domain.TransactionStatus;
 import com.afinco.backend.domain.ExpenseType;
 import com.afinco.backend.domain.TransactionType;
@@ -33,6 +32,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.YearMonth;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -67,6 +67,7 @@ class TransactionControllerTest {
         mockMvc.perform(get("/api/v1/transactions")
                         .param("startDate", "2026-09-01")
                         .param("endDate", "2026-09-30")
+                        .param("statementId", "3")
                         .param("accountId", "1")
                         .param("categoryId", "2")
                         .param("type", "DEBIT")
@@ -77,13 +78,41 @@ class TransactionControllerTest {
                 .andExpect(jsonPath("$.page").value(1))
                 .andExpect(jsonPath("$.totalElements").value(11))
                 .andExpect(jsonPath("$.content[0].description").value("Market"))
-                .andExpect(jsonPath("$.content[0].account.bankName").value("TD Bank"));
+                .andExpect(jsonPath("$.content[0].account.bankName").value("TD Bank"))
+                .andExpect(jsonPath("$.content[0].statement.id").value(3))
+                .andExpect(jsonPath("$.content[0].statement.periodStart").value("2026-08-14"));
 
         ArgumentCaptor<TransactionFilterRequest> captor = ArgumentCaptor.forClass(TransactionFilterRequest.class);
         verify(transactionService).findTransactions(captor.capture());
+        assertThat(captor.getValue().statementId()).isEqualTo(3L);
         assertThat(captor.getValue().accountId()).isEqualTo(1L);
         assertThat(captor.getValue().type()).isEqualTo(TransactionType.DEBIT);
         assertThat(captor.getValue().resolvedSize()).isEqualTo(10);
+    }
+
+    @Test
+    void acceptsAPageLargeEnoughForAWholeStatementButNotMore() throws Exception {
+        when(transactionService.findTransactions(any()))
+                .thenReturn(new PageResponse<>(List.of(), 0, 500, 0, 0, true, true));
+
+        mockMvc.perform(get("/api/v1/transactions").param("size", "500"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/transactions").param("size", "501"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.validationErrors.size").exists());
+    }
+
+    @Test
+    void listsMonthsThatContainTransactions() throws Exception {
+        when(transactionService.findMonths()).thenReturn(List.of(
+                new TransactionMonthResponse(YearMonth.of(2026, 3), 41),
+                new TransactionMonthResponse(YearMonth.of(2026, 2), 12)));
+
+        mockMvc.perform(get("/api/v1/transactions/months"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].month").value("2026-03"))
+                .andExpect(jsonPath("$[0].transactionCount").value(41))
+                .andExpect(jsonPath("$[1].month").value("2026-02"));
     }
 
     @Test
@@ -98,70 +127,6 @@ class TransactionControllerTest {
                 .andExpect(header().string("Location", "/api/v1/transactions/9"))
                 .andExpect(jsonPath("$.id").value(9))
                 .andExpect(jsonPath("$.status").value("CONFIRMED"));
-    }
-
-    @Test
-    void createsReviewedBatchAndReportsPendingDuplicates() throws Exception {
-        TransactionBatchRequest request = new TransactionBatchRequest(4L, List.of(batchItem(true)));
-        when(transactionService.createBatch(request)).thenReturn(new TransactionBatchResponse(
-                1, 0, List.of(response(TransactionStatus.CONFIRMED))));
-
-        mockMvc.perform(post("/api/v1/transactions/batch")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.savedCount").value(1))
-                .andExpect(jsonPath("$.duplicateCount").value(0))
-                .andExpect(jsonPath("$.transactions[0].status").value("CONFIRMED"));
-    }
-
-    @Test
-    void rejectsAnEmptyBatch() throws Exception {
-        mockMvc.perform(post("/api/v1/transactions/batch")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"accountId": 4, "transactions": []}
-                                """))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.validationErrors.transactions").exists());
-
-        verify(transactionService, never()).createBatch(any());
-    }
-
-    @Test
-    void rejectsABatchRowMissingItsCategory() throws Exception {
-        mockMvc.perform(post("/api/v1/transactions/batch")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "accountId": 4,
-                                  "transactions": [
-                                    {
-                                      "date": "2026-09-11",
-                                      "amount": 42.35,
-                                      "type": "CREDIT",
-                                      "description": "Harbour Market",
-                                      "forceDuplicate": false
-                                    }
-                                  ]
-                                }
-                                """))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.validationErrors['transactions[0].categoryId']").exists());
-
-        verify(transactionService, never()).createBatch(any());
-    }
-
-    @Test
-    void rejectsABatchContainingANullRow() throws Exception {
-        mockMvc.perform(post("/api/v1/transactions/batch")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"accountId": 4, "transactions": [null]}
-                                """))
-                .andExpect(status().isBadRequest());
-
-        verify(transactionService, never()).createBatch(any());
     }
 
     @Test
@@ -257,18 +222,6 @@ class TransactionControllerTest {
                 .andExpect(jsonPath("$.validationErrors.type").exists());
     }
 
-    private TransactionBatchItemRequest batchItem(boolean forceDuplicate) {
-        return new TransactionBatchItemRequest(
-                7L,
-                LocalDate.of(2026, 9, 11),
-                new BigDecimal("42.35"),
-                TransactionType.CREDIT,
-                "Harbour Market",
-                HASH,
-                null,
-                forceDuplicate);
-    }
-
     private TransactionCreateRequest createRequest() {
         return new TransactionCreateRequest(
                 1L,
@@ -286,6 +239,8 @@ class TransactionControllerTest {
                 9L,
                 new AccountResponse(1L, "TD Bank", "1234", "CAD"),
                 new CategoryResponse(2L, "Groceries", ExpenseType.VARIABLE, "#2563EB"),
+                new StatementSummaryResponse(
+                        3L, StatementType.CREDIT_CARD, LocalDate.of(2026, 8, 14), LocalDate.of(2026, 9, 13)),
                 LocalDate.of(2026, 9, 11),
                 new BigDecimal("42.35"),
                 TransactionType.DEBIT,

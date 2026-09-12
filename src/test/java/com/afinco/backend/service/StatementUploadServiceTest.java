@@ -3,12 +3,14 @@ package com.afinco.backend.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.afinco.backend.api.statement.dto.StatementUploadResponse;
 import com.afinco.backend.domain.ExpenseType;
+import com.afinco.backend.domain.StatementPeriod;
 import com.afinco.backend.domain.TransactionStatus;
 import com.afinco.backend.domain.TransactionType;
 import com.afinco.backend.exception.InvalidRequestException;
@@ -16,11 +18,12 @@ import com.afinco.backend.exception.StatementParsingException;
 import com.afinco.backend.exception.UnsupportedStatementException;
 import com.afinco.backend.repository.TransactionRepository;
 import com.afinco.backend.statement.PdfTextExtractor;
+import com.afinco.backend.statement.StatementDocument;
 import com.afinco.backend.statement.StatementParser;
 import com.afinco.backend.statement.StatementParserFactory;
-import com.afinco.backend.statement.StatementType;
+import com.afinco.backend.domain.StatementType;
+import com.afinco.backend.statement.dto.ParsedStatement;
 import com.afinco.backend.statement.dto.ParsedTransactionDTO;
-import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
@@ -41,6 +44,7 @@ class StatementUploadServiceTest {
     private static final byte[] PDF_BYTES = "%PDF-1.7 synthetic fixture".getBytes(StandardCharsets.US_ASCII);
     private static final String BANK_NAME = "TD Bank";
     private static final String DOCUMENT_TEXT = "TD Bank synthetic statement";
+    private static final StatementPeriod PERIOD = new StatementPeriod(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 15));
 
     @Mock
     private PdfTextExtractor textExtractor;
@@ -62,7 +66,8 @@ class StatementUploadServiceTest {
     @BeforeEach
     void setUp() {
         service = new StatementUploadService(
-                textExtractor, parserFactory, signatureService, transactionRepository, categorizationService);
+                textExtractor, parserFactory, signatureService,
+                new ExistingSignatureLookup(transactionRepository), categorizationService);
     }
 
     @Test
@@ -76,6 +81,9 @@ class StatementUploadServiceTest {
         StatementUploadResponse result = service.parse(PDF_BYTES, StatementType.CREDIT_CARD);
 
         assertThat(result.bankName()).isEqualTo(BANK_NAME);
+        assertThat(result.statementType()).isEqualTo(StatementType.CREDIT_CARD);
+        assertThat(result.periodStart()).isEqualTo(PERIOD.startDate());
+        assertThat(result.periodEnd()).isEqualTo(PERIOD.endDate());
         assertThat(result.transactionCount()).isEqualTo(2);
         assertThat(result.duplicateCount()).isEqualTo(1);
         assertThat(result.total()).isEqualByComparingTo("-51.50");
@@ -171,21 +179,36 @@ class StatementUploadServiceTest {
     }
 
     @Test
-    void passesOriginalPdfBytesToSelectedParser() throws Exception {
+    void extractsTextOnceAndHandsTheSameDocumentToTheSelectedParser() {
         prepareParser(List.of());
 
         service.parse(PDF_BYTES, StatementType.CREDIT_CARD);
 
-        ArgumentCaptor<InputStream> captor = ArgumentCaptor.forClass(InputStream.class);
+        ArgumentCaptor<StatementDocument> captor = ArgumentCaptor.forClass(StatementDocument.class);
         verify(parser).parse(captor.capture());
-        assertThat(captor.getValue().readAllBytes()).containsExactly(PDF_BYTES);
+        assertThat(captor.getValue().content()).containsExactly(PDF_BYTES);
+        assertThat(captor.getValue().text()).isEqualTo(DOCUMENT_TEXT);
+        verify(textExtractor, times(1)).extract(PDF_BYTES);
+    }
+
+    @Test
+    void typesRowsFromTheRequestedStatementType() {
+        when(textExtractor.extract(PDF_BYTES)).thenReturn(DOCUMENT_TEXT);
+        when(parserFactory.getParser(StatementType.CHECKING_ACCOUNT, DOCUMENT_TEXT)).thenReturn(parser);
+        when(parser.parse(any(StatementDocument.class))).thenReturn(new ParsedStatement(
+                BANK_NAME, StatementType.CHECKING_ACCOUNT, PERIOD, List.of(transaction("Payroll", "10.00"))));
+        when(transactionRepository.findExistingHashSignatures(any())).thenReturn(Set.of());
+
+        StatementUploadResponse result = service.parse(PDF_BYTES, StatementType.CHECKING_ACCOUNT);
+
+        assertThat(result.transactions()).extracting(item -> item.type()).containsExactly(TransactionType.DEBIT);
     }
 
     private void prepareParser(List<ParsedTransactionDTO> transactions) {
         when(textExtractor.extract(PDF_BYTES)).thenReturn(DOCUMENT_TEXT);
         when(parserFactory.getParser(StatementType.CREDIT_CARD, DOCUMENT_TEXT)).thenReturn(parser);
-        when(parser.bankName()).thenReturn(BANK_NAME);
-        when(parser.parse(any(InputStream.class))).thenReturn(transactions);
+        when(parser.parse(any(StatementDocument.class))).thenReturn(
+                new ParsedStatement(BANK_NAME, StatementType.CREDIT_CARD, PERIOD, transactions));
     }
 
     private ParsedTransactionDTO transaction(String description, String amount) {

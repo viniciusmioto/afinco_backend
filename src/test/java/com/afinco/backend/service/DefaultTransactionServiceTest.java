@@ -14,6 +14,7 @@ import com.afinco.backend.api.transaction.dto.DuplicateResolutionRequest;
 import com.afinco.backend.api.transaction.dto.PageResponse;
 import com.afinco.backend.api.transaction.dto.TransactionCreateRequest;
 import com.afinco.backend.api.transaction.dto.TransactionFilterRequest;
+import com.afinco.backend.api.transaction.dto.TransactionMonthResponse;
 import com.afinco.backend.api.transaction.dto.TransactionResponse;
 import com.afinco.backend.domain.Account;
 import com.afinco.backend.domain.ExpenseType;
@@ -28,8 +29,10 @@ import com.afinco.backend.mapper.TransactionMapper;
 import com.afinco.backend.repository.AccountRepository;
 import com.afinco.backend.repository.CategoryRepository;
 import com.afinco.backend.repository.TransactionRepository;
+import com.afinco.backend.repository.projection.DailyTransactionCount;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -77,6 +80,7 @@ class DefaultTransactionServiceTest {
         TransactionFilterRequest filters = new TransactionFilterRequest(
                 LocalDate.of(2026, 9, 1),
                 LocalDate.of(2026, 9, 30),
+                3L,
                 1L,
                 2L,
                 TransactionType.DEBIT,
@@ -88,6 +92,7 @@ class DefaultTransactionServiceTest {
         when(transactionRepository.findAllMatchingFilters(
                         eq(filters.startDate()),
                         eq(filters.endDate()),
+                        eq(filters.statementId()),
                         eq(filters.accountId()),
                         eq(filters.categoryId()),
                         eq(filters.type()),
@@ -102,6 +107,7 @@ class DefaultTransactionServiceTest {
         verify(transactionRepository).findAllMatchingFilters(
                 eq(filters.startDate()),
                 eq(filters.endDate()),
+                eq(filters.statementId()),
                 eq(filters.accountId()),
                 eq(filters.categoryId()),
                 eq(filters.type()),
@@ -110,6 +116,20 @@ class DefaultTransactionServiceTest {
                         pageable.getPageNumber() == 0
                                 && pageable.getPageSize() == 20
                                 && pageable.getSort().getOrderFor("date").isDescending()));
+    }
+
+    @Test
+    void groupsDailyCountsIntoCalendarMonthsNewestFirst() {
+        when(transactionRepository.countByDate()).thenReturn(List.of(
+                day(LocalDate.of(2026, 2, 13), 2),
+                day(LocalDate.of(2026, 3, 1), 5),
+                day(LocalDate.of(2026, 2, 3), 1),
+                day(LocalDate.of(2025, 12, 31), 4)));
+
+        assertThat(service.findMonths()).containsExactly(
+                new TransactionMonthResponse(YearMonth.of(2026, 3), 5),
+                new TransactionMonthResponse(YearMonth.of(2026, 2), 3),
+                new TransactionMonthResponse(YearMonth.of(2025, 12), 4));
     }
 
     @Test
@@ -241,6 +261,20 @@ class DefaultTransactionServiceTest {
                 "raw line");
     }
 
+    private static DailyTransactionCount day(LocalDate date, long transactionCount) {
+        return new DailyTransactionCount() {
+            @Override
+            public LocalDate getDate() {
+                return date;
+            }
+
+            @Override
+            public long getTransactionCount() {
+                return transactionCount;
+            }
+        };
+    }
+
     private Account account() {
         return new Account("TD Bank", "1234", "CAD");
     }
@@ -254,6 +288,7 @@ class DefaultTransactionServiceTest {
                 9L,
                 new AccountResponse(1L, "TD Bank", "1234", "CAD"),
                 new CategoryResponse(2L, "Groceries", ExpenseType.VARIABLE, "#2563EB"),
+                null,
                 LocalDate.of(2026, 9, 11),
                 new BigDecimal("42.35"),
                 TransactionType.DEBIT,

@@ -4,6 +4,8 @@ import com.afinco.backend.domain.Transaction;
 import com.afinco.backend.domain.TransactionStatus;
 import com.afinco.backend.domain.TransactionType;
 import com.afinco.backend.repository.projection.CategoryAggregation;
+import com.afinco.backend.repository.projection.DailyTransactionCount;
+import com.afinco.backend.repository.projection.StatementTransactionCount;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
@@ -27,8 +29,10 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
                     FROM Transaction tx
                     JOIN FETCH tx.account account
                     JOIN FETCH tx.category category
+                    LEFT JOIN FETCH tx.statement statement
                     WHERE (:startDate IS NULL OR tx.date >= :startDate)
                       AND (:endDate IS NULL OR tx.date <= :endDate)
+                      AND (:statementId IS NULL OR statement.id = :statementId)
                       AND (:accountId IS NULL OR account.id = :accountId)
                       AND (:categoryId IS NULL OR category.id = :categoryId)
                       AND (:type IS NULL OR tx.type = :type)
@@ -37,8 +41,10 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             countQuery = """
                     SELECT COUNT(tx)
                     FROM Transaction tx
+                    LEFT JOIN tx.statement statement
                     WHERE (:startDate IS NULL OR tx.date >= :startDate)
                       AND (:endDate IS NULL OR tx.date <= :endDate)
+                      AND (:statementId IS NULL OR statement.id = :statementId)
                       AND (:accountId IS NULL OR tx.account.id = :accountId)
                       AND (:categoryId IS NULL OR tx.category.id = :categoryId)
                       AND (:type IS NULL OR tx.type = :type)
@@ -47,11 +53,26 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     Page<Transaction> findAllMatchingFilters(
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate,
+            @Param("statementId") Long statementId,
             @Param("accountId") Long accountId,
             @Param("categoryId") Long categoryId,
             @Param("type") TransactionType type,
             @Param("status") TransactionStatus status,
             Pageable pageable);
+
+    long countByStatementId(Long statementId);
+
+    @Query("""
+            SELECT statement.id AS statementId, COUNT(tx) AS transactionCount
+            FROM Transaction tx
+            JOIN tx.statement statement
+            GROUP BY statement.id
+            """)
+    List<StatementTransactionCount> countByStatement();
+
+    /** Per-day counts stay small (at most one row per calendar day) and are grouped into months in Java. */
+    @Query("SELECT tx.date AS date, COUNT(tx) AS transactionCount FROM Transaction tx GROUP BY tx.date")
+    List<DailyTransactionCount> countByDate();
 
     @Query("""
             SELECT category.id AS categoryId,

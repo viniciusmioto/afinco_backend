@@ -2,6 +2,7 @@ package com.afinco.backend.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -30,6 +31,49 @@ class DomainModelTest {
         assertThatIllegalArgumentException()
                 .isThrownBy(() -> new AppUser("test@example.com", "plain text"))
                 .withMessageContaining("BCrypt");
+    }
+
+    @Test
+    void rejectsAStatementPeriodThatEndsBeforeItStarts() {
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new StatementPeriod(LocalDate.of(2026, 2, 13), LocalDate.of(2026, 2, 3)))
+                .withMessageContaining("start");
+        assertThatNullPointerException()
+                .isThrownBy(() -> new StatementPeriod(null, LocalDate.of(2026, 2, 3)));
+        assertThat(new StatementPeriod(LocalDate.of(2026, 2, 3), LocalDate.of(2026, 2, 3)).endDate())
+                .isEqualTo(LocalDate.of(2026, 2, 3));
+    }
+
+    @Test
+    void derivesTheTransactionTypeFromTheStatementType() {
+        assertThat(StatementType.CREDIT_CARD.transactionType()).isEqualTo(TransactionType.CREDIT);
+        assertThat(StatementType.CHECKING_ACCOUNT.transactionType()).isEqualTo(TransactionType.DEBIT);
+    }
+
+    @Test
+    void keepsAStatementTransactionOnTheStatementsAccount() throws ReflectiveOperationException {
+        Account statementAccount = withId(new Account("TD Bank", "1234", "CAD"), 1L);
+        Account otherAccount = withId(new Account("RBC", "5678", "CAD"), 2L);
+        Category category = new Category("Groceries", ExpenseType.VARIABLE, "#2563EB");
+        Statement statement = new Statement(statementAccount, StatementType.CREDIT_CARD,
+                new StatementPeriod(LocalDate.of(2026, 2, 3), LocalDate.of(2026, 2, 13)));
+
+        Transaction linked = new Transaction(statement, statementAccount, category, LocalDate.of(2026, 2, 5),
+                BigDecimal.ONE, TransactionType.CREDIT, "Transit", VALID_HASH, TransactionStatus.CONFIRMED, null);
+
+        assertThat(linked.getStatement()).isSameAs(statement);
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new Transaction(statement, otherAccount, category, LocalDate.of(2026, 2, 5),
+                        BigDecimal.ONE, TransactionType.CREDIT, "Transit", VALID_HASH,
+                        TransactionStatus.CONFIRMED, null))
+                .withMessageContaining("statement's account");
+    }
+
+    private static Account withId(Account account, long id) throws ReflectiveOperationException {
+        var field = Account.class.getDeclaredField("id");
+        field.setAccessible(true);
+        field.set(account, id);
+        return account;
     }
 
     @Test

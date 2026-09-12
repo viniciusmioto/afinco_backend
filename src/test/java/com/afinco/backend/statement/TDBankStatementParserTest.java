@@ -4,10 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
+import com.afinco.backend.domain.StatementPeriod;
+import com.afinco.backend.domain.StatementType;
 import com.afinco.backend.domain.TransactionType;
 import com.afinco.backend.exception.StatementParsingException;
+import com.afinco.backend.exception.UnsupportedStatementException;
+import com.afinco.backend.statement.dto.ParsedStatement;
 import com.afinco.backend.statement.dto.ParsedTransactionDTO;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -25,7 +28,8 @@ class TDBankStatementParserTest {
             DATE DATE ACTIVITY DESCRIPTION AMOUNT($)
             """;
 
-    private final TDBankStatementParser parser = new TDBankStatementParser(new PdfTextExtractor());
+    private final PdfTextExtractor extractor = new PdfTextExtractor();
+    private final TDBankStatementParser parser = new TDBankStatementParser(extractor);
 
     @Test
     void parsesSyntheticFixtureWithYearRolloverAndFormattedAmounts() throws IOException {
@@ -51,7 +55,13 @@ class TDBankStatementParserTest {
     void parsesPdfAcrossPagesAndExcludesSidebarAndSummaryAmounts() throws IOException {
         byte[] pdf = SyntheticStatementPdf.statementWithSidebarAndContinuation();
 
-        List<ParsedTransactionDTO> parsed = parser.parse(new ByteArrayInputStream(pdf));
+        ParsedStatement statement = parser.parse(document(pdf));
+        List<ParsedTransactionDTO> parsed = statement.transactions();
+
+        assertThat(statement.bankName()).isEqualTo("TD Bank");
+        assertThat(statement.statementType()).isEqualTo(StatementType.CREDIT_CARD);
+        assertThat(statement.period()).isEqualTo(
+                new StatementPeriod(LocalDate.of(2025, 12, 16), LocalDate.of(2026, 1, 15)));
 
         assertThat(parsed).extracting(ParsedTransactionDTO::description)
                 .containsExactly("CORNER SHOP", "ONLINE SERVICE", "MERCHANT REFUND");
@@ -142,19 +152,72 @@ class TDBankStatementParserTest {
                 .isInstanceOf(StatementParsingException.class);
     }
 
-    @Test
-    void rejectsUnreadablePdfStreams() {
-        InputStream input = new ByteArrayInputStream("not a PDF".getBytes(StandardCharsets.UTF_8));
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "STATEMENT PERIOD: February 03, 2026 to February 13, 2026",
+        "Statement Period: February 3 2026 TO February 13 2026 Total Cash Back Dollars = 1.59",
+        "STATEMENTPERIOD:February03,2026toFebruary13,2026",
+        "STATEMENT PERIOD: Feb. 03, 2026 - Feb. 13, 2026"})
+    void readsTheStatementPeriodAsPrintedOnTdStatements(String line) {
+        assertThat(parser.period("TD CASH BACK VISA\n" + line + "\n"))
+                .isEqualTo(new StatementPeriod(LocalDate.of(2026, 2, 3), LocalDate.of(2026, 2, 13)));
+    }
 
-        assertThatThrownBy(() -> parser.parse(input))
+    @Test
+    void readsAPeriodThatCrossesTheYearBoundary() {
+        assertThat(parser.period("STATEMENT PERIOD: December 16, 2025 to January 15, 2026"))
+                .isEqualTo(new StatementPeriod(LocalDate.of(2025, 12, 16), LocalDate.of(2026, 1, 15)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "Earned this statement period + 1.10",
+        "STATEMENT PERIOD: February 13, 2026",
+        "STATEMENT PERIOD: February 13, 2026 to February 03, 2026",
+        "STATEMENT PERIOD: Smarch 13, 2026 to February 03, 2026",
+        "STATEMENT PERIOD: February 30, 2026 to March 13, 2026"})
+    void rejectsAMissingInvertedOrInvalidPeriod(String line) {
+        assertThatThrownBy(() -> parser.period("TD CASH BACK VISA\n" + line))
+                .isInstanceOf(StatementParsingException.class);
+    }
+
+    @Test
+    void requiresTheStatementPeriodWhenParsingADocument() throws IOException {
+        byte[] pdf = SyntheticStatementPdf.statementWithSidebarAndContinuation();
+        String textWithoutPeriod = extractor.extract(pdf).replaceAll("(?i)STATEMENT PERIOD", "BILLING CYCLE");
+
+        assertThatThrownBy(() -> parser.parse(new StatementDocument(pdf, textWithoutPeriod)))
+                .isInstanceOf(StatementParsingException.class)
+                .hasMessageContaining("period");
+    }
+
+    @Test
+    void rejectsADocumentWhoseTextIsNotATdStatement() {
+        byte[] content = "%PDF-1.7".getBytes(StandardCharsets.US_ASCII);
+
+        assertThatThrownBy(() -> parser.parse(new StatementDocument(content, "Another bank statement")))
+                .isInstanceOf(UnsupportedStatementException.class);
+    }
+
+    @Test
+    void rejectsUnreadablePdfContent() {
+        byte[] content = "not a PDF".getBytes(StandardCharsets.UTF_8);
+        String text = "TD CASH BACK VISA\nSTATEMENT DATE: January 15, 2026\n"
+                + "STATEMENT PERIOD: December 16, 2025 to January 15, 2026\n";
+
+        assertThatThrownBy(() -> parser.parse(new StatementDocument(content, text)))
                 .isInstanceOf(StatementParsingException.class);
     }
 
     @Test
     void readsOwnerEncryptedBankPdfThatAllowsExtractionWithoutPassword() throws IOException {
-        var transactions = parser.parse(new ByteArrayInputStream(SyntheticStatementPdf.ownerEncrypted(true)));
+        var statement = parser.parse(document(SyntheticStatementPdf.ownerEncrypted(true)));
 
-        assertThat(transactions).hasSize(3);
+        assertThat(statement.transactions()).hasSize(3);
+    }
+
+    private StatementDocument document(byte[] pdf) {
+        return new StatementDocument(pdf, extractor.extract(pdf));
     }
 
     private String statement(String date, String rows) {

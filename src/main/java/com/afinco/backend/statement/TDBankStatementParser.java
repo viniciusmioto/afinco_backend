@@ -1,12 +1,14 @@
 package com.afinco.backend.statement;
 
+import com.afinco.backend.domain.StatementPeriod;
+import com.afinco.backend.domain.StatementType;
 import com.afinco.backend.domain.TransactionType;
 import com.afinco.backend.exception.StatementParsingException;
 import com.afinco.backend.exception.UnsupportedStatementException;
+import com.afinco.backend.statement.dto.ParsedStatement;
 import com.afinco.backend.statement.dto.ParsedTransactionDTO;
 import java.awt.geom.Rectangle2D;
 import java.io.IOException;
-import java.io.InputStream;
 import java.math.BigDecimal;
 import java.time.DateTimeException;
 import java.time.LocalDate;
@@ -29,8 +31,10 @@ import org.springframework.stereotype.Component;
 /** English TD credit-card e-statements. Scans and deposit-account layouts are not supported. */
 @Component
 public class TDBankStatementParser implements StatementParser {
-    private static final Pattern STATEMENT_DATE = Pattern.compile(
-            "(?i)STATEMENT\\s*DATE\\s*:\\s*([a-z]+)\\.?\\s*(\\d{1,2})\\s*,?\\s*(\\d{4})");
+    private static final String LONG_DATE = "([a-z]+)\\.?\\s*(\\d{1,2})\\s*,?\\s*(\\d{4})";
+    private static final Pattern STATEMENT_DATE = Pattern.compile("(?i)STATEMENT\\s*DATE\\s*:\\s*" + LONG_DATE);
+    private static final Pattern STATEMENT_PERIOD = Pattern.compile(
+            "(?i)STATEMENT\\s*PERIOD\\s*:\\s*" + LONG_DATE + "\\s*(?:TO|-|\u2013)\\s*" + LONG_DATE);
     private static final String MONTH = "(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)";
     private static final Pattern ROW = Pattern.compile(
             "(?i)^" + MONTH + "\\.?\\s*(\\d{1,2})\\s+" + MONTH + "\\.?\\s*(\\d{1,2})\\s+(.+)$");
@@ -66,23 +70,37 @@ public class TDBankStatementParser implements StatementParser {
     }
 
     @Override
-    public List<ParsedTransactionDTO> parse(InputStream stream) {
-        if (stream == null) {
-            throw new StatementParsingException("A PDF stream is required");
+    public ParsedStatement parse(StatementDocument document) {
+        if (document == null) {
+            throw new StatementParsingException("A PDF document is required");
         }
+        if (!supports(document.text())) {
+            throw new UnsupportedStatementException("The document is not a recognized TD statement");
+        }
+        LocalDate statementDate = statementDate(document.text());
+        StatementPeriod period = period(document.text());
         try {
-            byte[] bytes = stream.readNBytes(PdfTextExtractor.MAX_BYTES + 1);
-            String text = extractor.extract(bytes);
-            if (!supports(text)) {
-                throw new UnsupportedStatementException("The document is not a recognized TD statement");
-            }
-            LocalDate statementDate = statementDate(text);
-            String table = extractTable(bytes);
-            return parseText("STATEMENT DATE: "
+            String table = extractTable(document.content());
+            List<ParsedTransactionDTO> transactions = parseText("STATEMENT DATE: "
                     + statementDate.format(DateTimeFormatter.ofPattern("MMMM d, uuuu", Locale.ENGLISH))
                     + "\n" + table);
+            return new ParsedStatement(bankName(), statementType(), period, transactions);
         } catch (IOException exception) {
             throw new StatementParsingException("The PDF cannot be read");
+        }
+    }
+
+    StatementPeriod period(String text) {
+        Matcher match = STATEMENT_PERIOD.matcher(text == null ? "" : text);
+        if (!match.find()) {
+            throw new StatementParsingException("Statement period is missing or unsupported");
+        }
+        try {
+            return new StatementPeriod(
+                    date(match.group(1), match.group(2), match.group(3)),
+                    date(match.group(4), match.group(5), match.group(6)));
+        } catch (DateTimeException | IllegalArgumentException exception) {
+            throw new StatementParsingException("Statement period is invalid");
         }
     }
 
@@ -160,11 +178,14 @@ public class TDBankStatementParser implements StatementParser {
             throw new StatementParsingException("Statement date is missing or unsupported");
         }
         try {
-            return LocalDate.of(Integer.parseInt(match.group(3)), month(match.group(1)),
-                    Integer.parseInt(match.group(2)));
+            return date(match.group(1), match.group(2), match.group(3));
         } catch (DateTimeException | IllegalArgumentException exception) {
             throw new StatementParsingException("Statement date is invalid");
         }
+    }
+
+    private LocalDate date(String monthText, String dayText, String yearText) {
+        return LocalDate.of(Integer.parseInt(yearText), month(monthText), Integer.parseInt(dayText));
     }
 
     private LocalDate resolveDate(String monthText, String dayText, LocalDate anchor) {
@@ -184,6 +205,9 @@ public class TDBankStatementParser implements StatementParser {
     }
 
     private int month(String text) {
+        if (text.length() < 3) {
+            throw new StatementParsingException("Month is invalid");
+        }
         String abbreviated = text.substring(0, 3).toUpperCase(Locale.ROOT);
         for (Month month : Month.values()) {
             if (month.name().startsWith(abbreviated)) {

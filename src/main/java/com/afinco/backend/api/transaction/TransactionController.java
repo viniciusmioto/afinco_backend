@@ -2,16 +2,15 @@ package com.afinco.backend.api.transaction;
 
 import com.afinco.backend.api.transaction.dto.DuplicateResolutionRequest;
 import com.afinco.backend.api.transaction.dto.PageResponse;
-import com.afinco.backend.api.transaction.dto.TransactionBatchRequest;
-import com.afinco.backend.api.transaction.dto.TransactionBatchResponse;
 import com.afinco.backend.api.transaction.dto.TransactionCreateRequest;
 import com.afinco.backend.api.transaction.dto.TransactionFilterRequest;
+import com.afinco.backend.api.transaction.dto.TransactionMonthResponse;
 import com.afinco.backend.api.transaction.dto.TransactionResponse;
 import com.afinco.backend.service.TransactionService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import java.net.URI;
-import org.springframework.http.HttpStatus;
+import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -40,18 +39,17 @@ public class TransactionController {
         return transactionService.findTransactions(filters);
     }
 
+    @GetMapping("/months")
+    public List<TransactionMonthResponse> findMonths() {
+        return transactionService.findMonths();
+    }
+
     @PostMapping({"", "/"})
     public ResponseEntity<TransactionResponse> create(
             @Valid @RequestBody TransactionCreateRequest request) {
         TransactionResponse transaction = transactionService.create(request);
         URI location = URI.create("/api/v1/transactions/" + transaction.id());
         return ResponseEntity.created(location).body(transaction);
-    }
-
-    @PostMapping("/batch")
-    public ResponseEntity<TransactionBatchResponse> createBatch(
-            @Valid @RequestBody TransactionBatchRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(transactionService.createBatch(request));
     }
 
     @PostMapping("/resolve-duplicate")

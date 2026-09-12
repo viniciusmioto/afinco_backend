@@ -41,6 +41,11 @@ public class Transaction {
     @JoinColumn(name = "category_id", nullable = false)
     private Category category;
 
+    /** The imported statement this row came from; null for manual entries. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "statement_id")
+    private Statement statement;
+
     @Column(nullable = false)
     private LocalDate date;
 
@@ -68,6 +73,7 @@ public class Transaction {
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    /** Creates a manual transaction that does not belong to any statement. */
     public Transaction(
             Account account,
             Category category,
@@ -78,7 +84,25 @@ public class Transaction {
             String hashSignature,
             TransactionStatus status,
             String rawText) {
+        this(null, account, category, date, amount, type, description, hashSignature, status, rawText);
+    }
+
+    public Transaction(
+            Statement statement,
+            Account account,
+            Category category,
+            LocalDate date,
+            BigDecimal amount,
+            TransactionType type,
+            String description,
+            String hashSignature,
+            TransactionStatus status,
+            String rawText) {
         this.account = Objects.requireNonNull(account, "Account must not be null");
+        if (statement != null && !statement.belongsTo(account)) {
+            throw new IllegalArgumentException("A transaction must use its statement's account");
+        }
+        this.statement = statement;
         this.category = Objects.requireNonNull(category, "Category must not be null");
         this.date = Objects.requireNonNull(date, "Transaction date must not be null");
         this.amount = requirePositiveAmount(amount);

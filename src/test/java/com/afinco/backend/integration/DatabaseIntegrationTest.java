@@ -5,14 +5,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.afinco.backend.domain.Account;
 import com.afinco.backend.domain.AppUser;
 import com.afinco.backend.domain.Category;
+import com.afinco.backend.domain.StatementPeriod;
+import com.afinco.backend.domain.StatementType;
 import com.afinco.backend.domain.Transaction;
 import com.afinco.backend.domain.TransactionStatus;
 import com.afinco.backend.domain.TransactionType;
 import com.afinco.backend.repository.AccountRepository;
+import com.afinco.backend.repository.StatementRepository;
 import com.afinco.backend.repository.UserRepository;
 import com.afinco.backend.repository.CategoryRepository;
 import com.afinco.backend.repository.TransactionRepository;
 import com.afinco.backend.repository.projection.CategoryAggregation;
+import com.afinco.backend.repository.projection.DailyTransactionCount;
+import com.afinco.backend.repository.projection.StatementTransactionCount;
 import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
 import java.nio.file.Path;
@@ -30,6 +35,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -66,6 +72,9 @@ class DatabaseIntegrationTest {
 
     @Autowired
     private TransactionRepository transactionRepository;
+
+    @Autowired
+    private StatementRepository statementRepository;
 
     @Autowired
     private UserRepository userRepository;
@@ -167,6 +176,7 @@ class DatabaseIntegrationTest {
         Page<Transaction> filtered = transactionRepository.findAllMatchingFilters(
                 LocalDate.of(2026, 9, 1),
                 LocalDate.of(2026, 9, 30),
+                null,
                 selectedAccount.getId(),
                 groceries.getId(),
                 TransactionType.DEBIT,
@@ -184,6 +194,7 @@ class DatabaseIntegrationTest {
                 null,
                 null,
                 null,
+                null,
                 PageRequest.of(0, 10));
 
         assertThat(filtered.getContent())
@@ -195,6 +206,73 @@ class DatabaseIntegrationTest {
         assertThat(aggregation.getFirst().getCategoryName()).isEqualTo("Groceries");
         assertThat(aggregation.getFirst().getTotalAmount()).isEqualByComparingTo("42.35");
         assertThat(aggregation.getFirst().getTransactionCount()).isEqualTo(1);
+    }
+
+    @Test
+    @Transactional
+    void storesStatementsAndScopesTransactionsToTheirSourceStatement() {
+        Account account = accountRepository.save(new Account("TD Bank", "1234", "CAD"));
+        Category category = categoryRepository.findByName("Groceries").orElseThrow();
+        StatementPeriod february = new StatementPeriod(LocalDate.of(2026, 2, 3), LocalDate.of(2026, 2, 13));
+        com.afinco.backend.domain.Statement statement = statementRepository.save(
+                new com.afinco.backend.domain.Statement(account, StatementType.CREDIT_CARD, february));
+        transactionRepository.saveAll(List.of(
+                new Transaction(statement, account, category, LocalDate.of(2026, 2, 5), new BigDecimal("7.00"),
+                        TransactionType.CREDIT, "Transit", "1".repeat(64), TransactionStatus.CONFIRMED, null),
+                new Transaction(statement, account, category, LocalDate.of(2026, 1, 30), new BigDecimal("9.00"),
+                        TransactionType.CREDIT, "Late posting", "2".repeat(64), TransactionStatus.CONFIRMED, null),
+                new Transaction(account, category, LocalDate.of(2026, 2, 7), new BigDecimal("3.00"),
+                        TransactionType.DEBIT, "Manual entry", "3".repeat(64), TransactionStatus.CONFIRMED, null)));
+        transactionRepository.flush();
+        entityManager.clear();
+
+        Page<Transaction> scoped = transactionRepository.findAllMatchingFilters(
+                null, null, statement.getId(), null, null, null, null, PageRequest.of(0, 10));
+        Page<Transaction> february2026 = transactionRepository.findAllMatchingFilters(
+                LocalDate.of(2026, 2, 1), LocalDate.of(2026, 2, 28), null, null, null, null, null,
+                PageRequest.of(0, 10));
+
+        assertThat(scoped.getContent()).extracting(Transaction::getDescription)
+                .containsExactlyInAnyOrder("Transit", "Late posting");
+        assertThat(scoped.getContent()).allSatisfy(row ->
+                assertThat(row.getStatement().getPeriod()).isEqualTo(february));
+        assertThat(february2026.getContent()).extracting(Transaction::getDescription)
+                .containsExactlyInAnyOrder("Transit", "Manual entry");
+        assertThat(february2026.getContent())
+                .filteredOn(row -> row.getDescription().equals("Manual entry"))
+                .singleElement()
+                .extracting(Transaction::getStatement)
+                .isNull();
+        assertThat(statementRepository.findByNaturalKey(
+                account.getId(), StatementType.CREDIT_CARD, february.startDate(), february.endDate()))
+                .get().extracting(com.afinco.backend.domain.Statement::getId).isEqualTo(statement.getId());
+        assertThat(transactionRepository.countByStatement())
+                .singleElement()
+                .extracting(StatementTransactionCount::getTransactionCount)
+                .isEqualTo(2L);
+        assertThat(transactionRepository.countByDate())
+                .extracting(DailyTransactionCount::getDate)
+                .containsExactlyInAnyOrder(LocalDate.of(2026, 2, 5), LocalDate.of(2026, 1, 30), LocalDate.of(2026, 2, 7));
+    }
+
+    @Test
+    void schemaRejectsASecondStatementForTheSameAccountTypeAndPeriod() {
+        Account account = accountRepository.save(new Account("TD Bank", "4321", "CAD"));
+        String insert = """
+                INSERT INTO statements (account_id, statement_type, period_start, period_end)
+                VALUES (?, 'CREDIT_CARD', '2026-03-14', '2026-04-13')
+                """;
+        jdbcTemplate.update(insert, account.getId());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbcTemplate.update(insert, account.getId()))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("UNIQUE");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbcTemplate.update("""
+                        INSERT INTO statements (account_id, statement_type, period_start, period_end)
+                        VALUES (?, 'CREDIT_CARD', '2026-05-13', '2026-04-14')
+                        """, account.getId()))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("CHECK");
     }
 
     private Transaction transaction(

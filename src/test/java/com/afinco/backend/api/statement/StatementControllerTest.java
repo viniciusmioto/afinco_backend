@@ -1,28 +1,38 @@
 package com.afinco.backend.api.statement;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.afinco.backend.api.statement.dto.ImportedTransactionRequest;
 import com.afinco.backend.api.statement.dto.ParsedTransactionResponse;
+import com.afinco.backend.api.statement.dto.StatementImportRequest;
+import com.afinco.backend.api.statement.dto.StatementImportResponse;
+import com.afinco.backend.api.statement.dto.StatementResponse;
 import com.afinco.backend.api.statement.dto.StatementUploadResponse;
+import com.afinco.backend.api.transaction.dto.AccountResponse;
 import com.afinco.backend.domain.ExpenseType;
 import com.afinco.backend.domain.TransactionStatus;
 import com.afinco.backend.domain.TransactionType;
 import com.afinco.backend.exception.InvalidRequestException;
 import com.afinco.backend.exception.StatementParsingException;
 import com.afinco.backend.exception.UnsupportedStatementException;
+import com.afinco.backend.service.StatementService;
 import com.afinco.backend.service.StatementUploadService;
-import com.afinco.backend.statement.StatementType;
+import com.afinco.backend.domain.StatementType;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,19 +56,113 @@ class StatementControllerTest {
     @MockitoBean
     private StatementUploadService service;
 
+    @MockitoBean
+    private StatementService statementService;
+
+    @Test
+    void listsStatementsWithTheirPeriodAndTransactionCount() throws Exception {
+        when(statementService.findStatements()).thenReturn(List.of(statementResponse()));
+
+        mockMvc.perform(get("/api/v1/statements"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(3))
+                .andExpect(jsonPath("$[0].account.accountNumberLast4").value("1234"))
+                .andExpect(jsonPath("$[0].statementType").value("CREDIT_CARD"))
+                .andExpect(jsonPath("$[0].periodStart").value("2026-02-03"))
+                .andExpect(jsonPath("$[0].periodEnd").value("2026-02-13"))
+                .andExpect(jsonPath("$[0].transactionCount").value(12));
+    }
+
+    @Test
+    void createsANewStatementWith201AndLocation() throws Exception {
+        StatementImportRequest request = importRequest();
+        when(statementService.importStatement(request))
+                .thenReturn(new StatementImportResponse(statementResponse(), true, 1, 0));
+
+        mockMvc.perform(post("/api/v1/statements")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(IMPORT_JSON))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Location", "/api/v1/statements/3"))
+                .andExpect(jsonPath("$.created").value(true))
+                .andExpect(jsonPath("$.savedCount").value(1))
+                .andExpect(jsonPath("$.statement.id").value(3));
+    }
+
+    @Test
+    void appendsToAnExistingStatementWith200() throws Exception {
+        when(statementService.importStatement(importRequest()))
+                .thenReturn(new StatementImportResponse(statementResponse(), false, 1, 1));
+
+        mockMvc.perform(post("/api/v1/statements")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(IMPORT_JSON))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("Location"))
+                .andExpect(jsonPath("$.created").value(false))
+                .andExpect(jsonPath("$.duplicateCount").value(1));
+    }
+
+    @Test
+    void rejectsAnImportWithoutRows() throws Exception {
+        mockMvc.perform(post("/api/v1/statements")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"accountId": 4, "statementType": "CREDIT_CARD",
+                                 "periodStart": "2026-02-03", "periodEnd": "2026-02-13", "transactions": []}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.validationErrors.transactions").exists());
+
+        verify(statementService, never()).importStatement(any());
+    }
+
+    @Test
+    void rejectsAnInvertedPeriodAndIncompleteRows() throws Exception {
+        mockMvc.perform(post("/api/v1/statements")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"accountId": 4, "statementType": "CREDIT_CARD",
+                                 "periodStart": "2026-02-13", "periodEnd": "2026-02-03",
+                                 "transactions": [{"date": "2026-02-05", "amount": 7.00, "description": "Transit"}]}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.validationErrors.periodValid").value("periodStart must not be after periodEnd"))
+                .andExpect(jsonPath("$.validationErrors['transactions[0].categoryId']").exists());
+
+        verify(statementService, never()).importStatement(any());
+    }
+
+    @Test
+    void rejectsAnImportContainingANullRow() throws Exception {
+        mockMvc.perform(post("/api/v1/statements")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"accountId": 4, "statementType": "CREDIT_CARD",
+                                 "periodStart": "2026-02-03", "periodEnd": "2026-02-13", "transactions": [null]}
+                                """))
+                .andExpect(status().isBadRequest());
+
+        verify(statementService, never()).importStatement(any());
+    }
+
     @Test
     void returnsStructuredPreviewWithDuplicateFlagsAndNoStore() throws Exception {
         ParsedTransactionResponse transaction = new ParsedTransactionResponse(
                 LocalDate.of(2026, 1, 15), new BigDecimal("18.50"), TransactionType.CREDIT,
                 "Synthetic Market", "TD Bank", "a".repeat(64), TransactionStatus.DUPLICATE_PENDING, true,
                 ExpenseType.OCCASIONAL, "Occasional");
-        when(service.parse(PDF_BYTES, StatementType.CREDIT_CARD)).thenReturn(
-                new StatementUploadResponse("TD Bank", 1, 1, new BigDecimal("18.50"), List.of(transaction)));
+        when(service.parse(PDF_BYTES, StatementType.CREDIT_CARD)).thenReturn(new StatementUploadResponse(
+                "TD Bank", StatementType.CREDIT_CARD, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 15),
+                1, 1, new BigDecimal("18.50"), List.of(transaction)));
 
         mockMvc.perform(creditCardUpload())
                 .andExpect(status().isOk())
                 .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(jsonPath("$.bankName").value("TD Bank"))
+                .andExpect(jsonPath("$.statementType").value("CREDIT_CARD"))
+                .andExpect(jsonPath("$.periodStart").value("2026-01-01"))
+                .andExpect(jsonPath("$.periodEnd").value("2026-01-15"))
                 .andExpect(jsonPath("$.transactionCount").value(1))
                 .andExpect(jsonPath("$.duplicateCount").value(1))
                 .andExpect(jsonPath("$.total").value(18.50))
@@ -187,6 +291,24 @@ class StatementControllerTest {
                 .andExpect(jsonPath("$.message").value("The uploaded PDF could not be read"));
 
         verifyNoInteractions(service);
+    }
+
+    private static final String IMPORT_JSON = """
+            {"accountId": 4, "statementType": "CREDIT_CARD", "periodStart": "2026-02-03", "periodEnd": "2026-02-13",
+             "transactions": [{"categoryId": 7, "date": "2026-02-05", "amount": 7.00,
+                               "description": "Transit", "forceDuplicate": false}]}
+            """;
+
+    private static StatementImportRequest importRequest() {
+        return new StatementImportRequest(4L, StatementType.CREDIT_CARD, LocalDate.of(2026, 2, 3),
+                LocalDate.of(2026, 2, 13), List.of(new ImportedTransactionRequest(
+                        7L, LocalDate.of(2026, 2, 5), new BigDecimal("7.00"), "Transit", false)));
+    }
+
+    private static StatementResponse statementResponse() {
+        return new StatementResponse(3L, new AccountResponse(4L, "TD Bank", "1234", "CAD"),
+                StatementType.CREDIT_CARD, LocalDate.of(2026, 2, 3), LocalDate.of(2026, 2, 13), 12,
+                LocalDateTime.of(2026, 9, 12, 18, 0));
     }
 
     private MockMultipartFile pdf() {

@@ -1,5 +1,6 @@
 package com.afinco.backend.statement;
 
+import com.afinco.backend.domain.StatementType;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

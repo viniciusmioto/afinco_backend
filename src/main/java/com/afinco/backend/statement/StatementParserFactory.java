@@ -1,5 +1,6 @@
 package com.afinco.backend.statement;
 
+import com.afinco.backend.domain.StatementType;
 import com.afinco.backend.exception.UnsupportedStatementException;
 import java.util.List;
 import org.springframework.stereotype.Component;

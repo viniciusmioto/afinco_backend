@@ -65,5 +65,9 @@ class CategorizationMigrationIntegrationTest {
         assertThat(jdbc.queryForObject(
                 "SELECT COUNT(*) FROM categories WHERE name IN ('Education', 'Income')",
                 Integer.class)).isZero();
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM transactions WHERE statement_id IS NULL", Integer.class))
+                .as("pre-statement transactions survive V4 without a statement")
+                .isEqualTo(1);
     }
 }

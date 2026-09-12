@@ -6,11 +6,13 @@ SQLite, Flyway, and Spring Data JPA.
 ## Project status
 
 Working today: SQLite-backed email/password authentication, hardened server-side
-sessions, account creation, TD credit-card statement upload and parsing, SHA-256
-duplicate detection, automatic expense-type/category suggestions, single and
-batched transaction persistence, duplicate resolution, transaction filtering,
-and account/category lookups. 243 tests pass under `mvn clean verify`, and the
-build, test run, and application startup emit no warnings on Java 21 through 26.
+sessions, account creation, TD credit-card statement upload and parsing
+(including the statement period), SHA-256 duplicate detection, automatic
+expense-type/category suggestions, persisted statements that own their imported
+transactions, manual transactions, duplicate resolution, statement- and
+month-scoped transaction queries, and account/category lookups. 269 tests pass
+under `mvn clean verify`, and the build, test run, and application startup emit
+no warnings on Java 21 through 26.
 
 The companion UI lives in the separate [afinco_frontend](https://github.com/viniciusmioto/afinco_frontend)
 repository.
@@ -24,21 +26,25 @@ Ordered roughly by how much each one blocks real use.
    planned dashboards have no data source. This query is currently dead code.
 2. **Account maintenance.** `POST /api/v1/accounts` creates an account, but
    there is no update or delete endpoint yet.
-3. **Checking-account parser.** `StatementType.CHECKING_ACCOUNT` is accepted and
+3. **Statement deletion.** An import can be extended by re-importing the same
+   period, but there is no `DELETE /api/v1/statements/{id}` to undo a whole
+   import. Transactions and statements use `ON DELETE RESTRICT`, so this needs
+   an explicit service that removes a statement's rows first.
+4. **Checking-account parser.** `StatementType.CHECKING_ACCOUNT` is accepted and
    validated but `StatementParserFactory` has no strategy for it, so those
    uploads return `422`. Rows from it are meant to be typed `DEBIT`.
-4. **RBC parser.** The factory registers TD only. RBC was intended as the second
+5. **RBC parser.** The factory registers TD only. RBC was intended as the second
    supported institution.
-5. **Category management.** The ten current categories are evolved and seeded by
+6. **Category management.** The ten current categories are evolved and seeded by
    `V2__categorization_model.sql` and can only be changed by editing the
    database. Custom user categories need create/update/delete endpoints.
-6. **Transaction editing.** Only create, batch-create, resolve-duplicate, and
-   delete exist. There is no `PUT`/`PATCH`, so correcting a wrong category or
+7. **Transaction editing.** Only create, statement import, resolve-duplicate,
+   and delete exist. There is no `PUT`/`PATCH`, so correcting a wrong category or
    amount means deleting and re-creating the row.
-7. **Password management.** The seeded `test@test.com` credential can only be
+8. **Password management.** The seeded `test@test.com` credential can only be
    rotated by editing SQLite; there is no change-password or user-management
    endpoint.
-8. **Scanned and encrypted PDFs.** OCR is not implemented, and statements that
+9. **Scanned and encrypted PDFs.** OCR is not implemented, and statements that
    require a password to open are rejected. Owner-encrypted PDFs that open
    without a password and allow text extraction do work.
 
@@ -110,14 +116,17 @@ Tests use a temporary SQLite database and never touch `./afinco.db`.
 
 The API is available under `/api/v1/transactions`:
 
-- `GET /api/v1/transactions` supports `startDate`, `endDate`, `accountId`,
-  `categoryId`, `type`, `status`, `page`, and `size` filters. Results default to
-  20 items and are ordered by transaction date and ID, newest first.
+- `GET /api/v1/transactions` supports `statementId`, `startDate`, `endDate`,
+  `accountId`, `categoryId`, `type`, `status`, `page`, and `size` filters.
+  Results default to 20 items (maximum 500, enough for a whole statement or
+  month) and are ordered by transaction date and ID, newest first. Every item
+  includes `statement` (`id`, `statementType`, `periodStart`, `periodEnd`), or
+  `null` for a manual entry.
+- `GET /api/v1/transactions/months` lists the calendar months that contain
+  transactions, newest first, as `[{ "month": "2026-07", "transactionCount": 40 }]`.
 - `POST /api/v1/transactions` creates a transaction. An existing SHA-256
   signature automatically produces the `DUPLICATE_PENDING` status. The server
   calculates the signature; the optional legacy `hashSignature` input is ignored.
-- `POST /api/v1/transactions/batch` persists a reviewed statement upload in one
-  request. See **Reviewed batch persistence** below.
 - `POST /api/v1/transactions/resolve-duplicate` confirms a pending duplicate
   using `{ "transactionId": 1, "status": "CONFIRMED" }`.
 - `DELETE /api/v1/transactions/{id}` removes a transaction, including a pending
@@ -141,45 +150,57 @@ form that calls `POST /api/v1/accounts` before saving.
 Unknown API routes return a structured `404`, and an unsupported HTTP method on
 a known route returns `405`, instead of falling through to the generic `500`.
 
-## Reviewed batch persistence
+## Statements
 
-`POST /api/v1/transactions/batch` saves the rows a reviewer approved after a
-statement upload. One statement covers one account, so `accountId` is sent once
-instead of being repeated per row:
+A statement is one imported bank document: its account, `statementType`, and
+inclusive billing period (`periodStart`, `periodEnd`). Every imported
+transaction references its statement through `transactions.statement_id`, so
+the source of any row is always known. Manual transactions and rows saved before
+Flyway V4 keep a `null` statement.
+
+- `GET /api/v1/statements` lists statements newest period first, each with its
+  `account`, period, `transactionCount`, and `importedAt`.
+- `POST /api/v1/statements` persists a reviewed upload preview:
 
 ```json
 {
   "accountId": 1,
+  "statementType": "CREDIT_CARD",
+  "periodStart": "2026-02-03",
+  "periodEnd": "2026-02-13",
   "transactions": [
     {
       "categoryId": 1,
-      "date": "2026-01-03",
-      "amount": 1234.56,
-      "type": "CREDIT",
-      "description": "ONLINE SERVICE",
+      "date": "2026-02-05",
+      "amount": 7.00,
+      "description": "CHRONO-RECHARGE OPUS MONTREAL",
       "forceDuplicate": false
     }
   ]
 }
 ```
 
-Rows the reviewer skipped are never sent. `forceDuplicate` carries the explicit
-"import anyway" decision for a row the upload preview flagged: a matching
-signature is stored as `CONFIRMED` when `forceDuplicate` is `true`, and as
-`DUPLICATE_PENDING` when it is `false`. A row with no signature match is always
-`CONFIRMED`. Repeated rows inside one batch follow the same rule, so the second
-identical row is flagged unless it was force-imported.
+The statement and its rows are written in one transaction. The natural key
+`(account, statementType, periodStart, periodEnd)` is unique: the first import
+of a period returns `201 Created` with a `Location` header, and importing the
+same period again appends the rows to that statement and returns `200 OK`
+(`created: false`). The response contains the `statement` (with its updated
+`transactionCount`), `created`, `savedCount`, and `duplicateCount` (saved rows
+still awaiting resolution).
 
-As with single creation, the server recalculates every signature from the
-resolved account's bank name, so a previewed `hashSignature` is accepted but
-never persisted. Existing signatures are looked up in batches of 400.
+Rows the reviewer skipped are never sent. The transaction type is derived from
+the statement type (`CREDIT_CARD` rows are `CREDIT`, `CHECKING_ACCOUNT` rows are
+`DEBIT`), and the duplicate signature is recalculated from the account's bank
+name, so neither is accepted from the client. `forceDuplicate` carries the
+explicit "import anyway" decision: a matching signature is stored as `CONFIRMED`
+when it is `true` and as `DUPLICATE_PENDING` when it is `false`. Repeated rows
+inside one import follow the same rule. Existing signatures are looked up in
+chunks of 400.
 
-The response reports `savedCount`, `duplicateCount` (saved rows still awaiting
-resolution), and the full `transactions` list. A batch holds 1 to 500 rows and
-is written in a single transaction, so an unknown `accountId` or `categoryId`
-returns `404` and saves nothing. Per-row validation failures return `400` with
-field keys such as `transactions[0].categoryId`. Confirm a pending duplicate
-afterwards with the resolution endpoint, or delete it to ignore it.
+An import holds 1 to 500 rows. An unknown `accountId` or `categoryId` returns
+`404` and saves nothing; an inverted period or incomplete row returns `400` with
+keys such as `periodValid` or `transactions[0].categoryId`. Confirm a pending
+duplicate afterwards with the resolution endpoint, or delete it to ignore it.
 
 Controllers only expose validated request and response DTOs; JPA entities remain
 inside the domain and persistence layers. API errors consistently include a UTC
@@ -198,15 +219,17 @@ scanned PDFs/OCR, password-required PDFs, and unrecognized layouts are unsupport
 Owner-encrypted statements that open without a password and permit text extraction
 are supported.
 Uploads are limited to 10 MiB and 100 pages. Dates use the transaction date (not
-posting date), with the statement date used to resolve year rollover.
+posting date), with the statement date used to resolve year rollover. The
+`STATEMENT PERIOD: February 03, 2026 to February 13, 2026` line is required; a
+statement without a readable period returns `422`.
 
-The response contains `bankName`, `transactionCount`, `duplicateCount`, `total`,
-and a `transactions` list. `total` is net activity: payment-category rows
+The response contains `bankName`, `statementType`, `periodStart`, `periodEnd`,
+`transactionCount`, `duplicateCount`, `total`, and a `transactions` list. `total` is net activity: payment-category rows
 reduce it while purchases increase it. Each item keeps a positive `amount` so
 it satisfies the persistence contract and also includes `date`, `type`,
 `description`, `bankName`, `hashSignature`, `status`, `duplicate`,
 `expenseType`, and the suggested `categoryName`. The review UI maps that name
-to the real category id before batch persistence.
+to the real category id before saving the statement.
 Every transaction from a credit-card statement is assigned `CREDIT`. When
 checking-account parsing is added, every transaction from that statement type
 will be assigned `DEBIT`.
@@ -214,8 +237,8 @@ will be assigned `DEBIT`.
 This endpoint is a preview: it does not save transactions or the PDF. Matching
 database hashes and repeated rows within an upload receive `DUPLICATE_PENDING`.
 Other rows receive `CONFIRMED`. Re-uploading an unsaved preview does not itself
-make rows database duplicates. To save approved rows, send them to
-`POST /api/v1/transactions/batch` with an existing `accountId` and a
+make rows database duplicates. To save approved rows, send them with the
+preview's period to `POST /api/v1/statements` with an existing `accountId` and a
 `categoryId` per row; it checks duplicates again. Confirm a saved pending
 duplicate using the resolution endpoint, or delete it to ignore it. Upload
 previews have no database transaction IDs to resolve yet.
@@ -250,7 +273,12 @@ curl --request POST 'http://localhost:8080/api/v1/statements/upload' \
 Invalid/missing uploads return structured `400` errors, unsupported Content-Type
 returns `415`, oversized uploads return `413`, and unreadable/unsupported
 statements return `422`. Responses use `Cache-Control: no-store`. Accepted PDF
-uploads stay in memory; filenames and extracted content are not logged. Private
+uploads stay in memory; filenames and extracted content are not logged.
+
+Parsing is not transactional: the PDF is read before the single SQLite
+connection is used for the duplicate lookup, and the text is extracted once and
+shared between parser selection and parsing. Several uploads can therefore be
+parsed concurrently; the frontend sends up to two at a time. Private
 PDFs are excluded from Git and Docker contexts. Committed fixtures are invented
 text; PDF tests generate their documents in memory. Never add real statements or
 API response exports to the repository.

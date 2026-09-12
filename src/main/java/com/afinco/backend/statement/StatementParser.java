@@ -1,11 +1,10 @@
 package com.afinco.backend.statement;
 
-import com.afinco.backend.statement.dto.ParsedTransactionDTO;
-import java.io.InputStream;
-import java.util.List;
+import com.afinco.backend.domain.StatementType;
+import com.afinco.backend.statement.dto.ParsedStatement;
 
 public interface StatementParser {
-    List<ParsedTransactionDTO> parse(InputStream stream);
+    ParsedStatement parse(StatementDocument document);
 
     boolean supports(String documentText);
 

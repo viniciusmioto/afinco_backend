@@ -77,7 +77,7 @@ class AuthenticationIntegrationTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("The requested API route does not exist"));
 
-        mockMvc.perform(get("/api/v1/transactions/batch").session(login.session()))
+        mockMvc.perform(get("/api/v1/statements/upload").session(login.session()))
                 .andExpect(status().isMethodNotAllowed())
                 .andExpect(jsonPath("$.message").value("The HTTP method is not supported for this route"));
     }
@@ -103,7 +103,7 @@ class AuthenticationIntegrationTest {
                 .andExpect(jsonPath("$.message").value("Authentication is required"));
 
         LoginContext login = login("test@test.com", "123@Test");
-        mockMvc.perform(post("/api/v1/transactions/batch")
+        mockMvc.perform(post("/api/v1/statements")
                         .session(login.session())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
@@ -128,7 +128,7 @@ class AuthenticationIntegrationTest {
     }
 
     @Test
-    void persistsAnImportedBatchAcrossLogoutAndLogin() throws Exception {
+    void persistsAnImportedStatementAcrossLogoutAndLogin() throws Exception {
         LoginContext firstSession = login("test@test.com", "123@Test");
         CsrfContext csrf = csrf(firstSession.session());
 
@@ -147,19 +147,21 @@ class AuthenticationIntegrationTest {
                         .andReturn().getResponse().getContentAsString())
                 .path(0).path("id").asLong();
 
-        mockMvc.perform(post("/api/v1/transactions/batch")
+        long statementId = objectMapper.readTree(mockMvc.perform(post("/api/v1/statements")
                         .session(firstSession.session())
                         .cookie(csrf.cookie())
                         .header("X-XSRF-TOKEN", csrf.token())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"accountId": %d, "transactions": [
-                                  {"categoryId": %d, "date": "2026-02-12", "amount": 7.00, "type": "CREDIT",
+                                {"accountId": %d, "statementType": "CREDIT_CARD",
+                                 "periodStart": "2026-02-03", "periodEnd": "2026-02-13", "transactions": [
+                                  {"categoryId": %d, "date": "2026-02-12", "amount": 7.00,
                                    "description": "CHRONO-RECHARGE OPUS MONTREAL", "forceDuplicate": false}
                                 ]}
                                 """.formatted(accountId, categoryId)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.savedCount").value(1));
+                .andExpect(jsonPath("$.savedCount").value(1))
+                .andReturn().getResponse().getContentAsString()).path("statement").path("id").asLong();
 
         mockMvc.perform(post("/api/v1/auth/logout")
                         .session(firstSession.session())
@@ -172,7 +174,13 @@ class AuthenticationIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.content[0].description").value("CHRONO-RECHARGE OPUS MONTREAL"))
-                .andExpect(jsonPath("$.content[0].account.accountNumberLast4").value("1234"));
+                .andExpect(jsonPath("$.content[0].account.accountNumberLast4").value("1234"))
+                .andExpect(jsonPath("$.content[0].statement.id").value(statementId));
+        mockMvc.perform(get("/api/v1/statements").session(secondSession.session()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(statementId))
+                .andExpect(jsonPath("$[0].periodEnd").value("2026-02-13"))
+                .andExpect(jsonPath("$[0].transactionCount").value(1));
     }
 
     private LoginContext login(String email, String password) throws Exception {

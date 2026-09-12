@@ -1,10 +1,12 @@
 package com.afinco.backend.mapper;
 
+import com.afinco.backend.api.statement.dto.ImportedTransactionRequest;
 import com.afinco.backend.api.transaction.dto.PageResponse;
 import com.afinco.backend.api.transaction.dto.TransactionCreateRequest;
 import com.afinco.backend.api.transaction.dto.TransactionResponse;
 import com.afinco.backend.domain.Account;
 import com.afinco.backend.domain.Category;
+import com.afinco.backend.domain.Statement;
 import com.afinco.backend.domain.Transaction;
 import com.afinco.backend.domain.TransactionStatus;
 import java.util.Objects;
@@ -16,10 +18,13 @@ public class TransactionMapper {
 
     private final AccountMapper accountMapper;
     private final CategoryMapper categoryMapper;
+    private final StatementMapper statementMapper;
 
-    public TransactionMapper(AccountMapper accountMapper, CategoryMapper categoryMapper) {
+    public TransactionMapper(
+            AccountMapper accountMapper, CategoryMapper categoryMapper, StatementMapper statementMapper) {
         this.accountMapper = accountMapper;
         this.categoryMapper = categoryMapper;
+        this.statementMapper = statementMapper;
     }
 
     public Transaction toEntity(
@@ -41,12 +46,34 @@ public class TransactionMapper {
                 request.rawText());
     }
 
+    public Transaction toEntity(
+            ImportedTransactionRequest request,
+            Statement statement,
+            Category category,
+            TransactionStatus status,
+            String hashSignature) {
+        Objects.requireNonNull(request, "Imported transaction request must not be null");
+        Objects.requireNonNull(statement, "Statement must not be null");
+        return new Transaction(
+                statement,
+                statement.getAccount(),
+                category,
+                request.date(),
+                request.amount(),
+                statement.getStatementType().transactionType(),
+                request.description(),
+                hashSignature,
+                status,
+                null);
+    }
+
     public TransactionResponse toResponse(Transaction transaction) {
         Objects.requireNonNull(transaction, "Transaction must not be null");
         return new TransactionResponse(
                 transaction.getId(),
                 accountMapper.toResponse(transaction.getAccount()),
                 categoryMapper.toResponse(transaction.getCategory()),
+                statementMapper.toSummary(transaction.getStatement()),
                 transaction.getDate(),
                 transaction.getAmount(),
                 transaction.getType(),
