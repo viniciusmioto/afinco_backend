@@ -2,8 +2,10 @@ package com.afinco.backend.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.afinco.backend.api.transaction.dto.AccountCreateRequest;
 import com.afinco.backend.api.transaction.dto.AccountResponse;
 import com.afinco.backend.api.transaction.dto.CategoryResponse;
 import com.afinco.backend.domain.Account;
@@ -17,6 +19,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Sort;
@@ -71,5 +74,19 @@ class DefaultReferenceDataServiceTest {
 
         assertThat(service.findAccounts()).isEmpty();
         assertThat(service.findCategories()).isEmpty();
+    }
+
+    @Test
+    void createsNormalizedAccount() {
+        AccountResponse expected = new AccountResponse(7L, "TD Bank", "1234", "CAD");
+        when(accountRepository.save(any(Account.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(accountMapper.toResponse(any(Account.class))).thenReturn(expected);
+
+        assertThat(service.createAccount(new AccountCreateRequest("  TD Bank ", "1234", "cad"))).isEqualTo(expected);
+
+        ArgumentCaptor<Account> saved = ArgumentCaptor.forClass(Account.class);
+        verify(accountRepository).save(saved.capture());
+        assertThat(saved.getValue().getBankName()).isEqualTo("TD Bank");
+        assertThat(saved.getValue().getCurrency()).isEqualTo("CAD");
     }
 }

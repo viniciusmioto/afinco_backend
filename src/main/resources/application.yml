@@ -1,6 +1,9 @@
 spring:
   application:
     name: afinco-backend
+  autoconfigure:
+    # Users live in SQLite; never fall back to Spring Boot's generated in-memory user.
+    exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
   servlet:
     multipart:
       max-file-size: 10MB
@@ -39,5 +42,10 @@ server:
 afinco:
   security:
     secure-cookies: ${AFINCO_SECURE_COOKIES:false}
+
+logging:
+  level:
+    # SQLite's ALTER TABLE validation query returns a result set that Flyway would dump into the log.
+    org.flywaydb.core.internal.sqlscript.DefaultSqlScriptExecutor: WARN
 
 spring.lifecycle.timeout-per-shutdown-phase: 20s

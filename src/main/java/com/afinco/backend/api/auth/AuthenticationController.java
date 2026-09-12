@@ -2,6 +2,7 @@ package com.afinco.backend.api.auth;
 
 import com.afinco.backend.api.auth.dto.CsrfTokenResponse;
 import com.afinco.backend.api.auth.dto.LoginRequest;
+import com.afinco.backend.api.auth.dto.SessionResponse;
 import com.afinco.backend.api.auth.dto.UserResponse;
 import com.afinco.backend.domain.AppUser;
 import com.afinco.backend.exception.AuthenticationFailedException;
@@ -100,6 +101,19 @@ public class AuthenticationController {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .body(toResponse((AfincoUserPrincipal) authentication.getPrincipal()));
+    }
+
+    /**
+     * Public counterpart of {@code /me}: lets the UI check for a live session without triggering a 401,
+     * for example after a backend restart discarded the in-memory session behind a stale cookie.
+     */
+    @GetMapping("/session")
+    public ResponseEntity<SessionResponse> session(Authentication authentication) {
+        SessionResponse session = authentication != null
+                && authentication.getPrincipal() instanceof AfincoUserPrincipal principal
+                ? new SessionResponse(true, toResponse(principal))
+                : SessionResponse.anonymous();
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(session);
     }
 
     private UserResponse toResponse(AfincoUserPrincipal principal) {

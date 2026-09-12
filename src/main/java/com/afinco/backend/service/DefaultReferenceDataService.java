@@ -1,7 +1,9 @@
 package com.afinco.backend.service;
 
+import com.afinco.backend.api.transaction.dto.AccountCreateRequest;
 import com.afinco.backend.api.transaction.dto.AccountResponse;
 import com.afinco.backend.api.transaction.dto.CategoryResponse;
+import com.afinco.backend.domain.Account;
 import com.afinco.backend.mapper.AccountMapper;
 import com.afinco.backend.mapper.CategoryMapper;
 import com.afinco.backend.repository.AccountRepository;
@@ -37,6 +39,13 @@ public class DefaultReferenceDataService implements ReferenceDataService {
     @Override
     public List<AccountResponse> findAccounts() {
         return accountRepository.findAll(ACCOUNT_SORT).stream().map(accountMapper::toResponse).toList();
+    }
+
+    @Override
+    @Transactional
+    public AccountResponse createAccount(AccountCreateRequest request) {
+        Account account = new Account(request.bankName(), request.accountNumberLast4(), request.currency());
+        return accountMapper.toResponse(accountRepository.save(account));
     }
 
     @Override

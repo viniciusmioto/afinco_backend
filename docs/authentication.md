@@ -14,13 +14,16 @@ and no signing key or access token is stored in browser JavaScript storage.
    BCrypt hash. A successful login rotates the session ID and the CSRF token.
 4. The backend returns an HTTP-only `JSESSIONID` cookie. The Next.js same-origin
    proxy relays this cookie and all later auth/CSRF headers.
-5. Every API except the CSRF and login endpoints requires the server-side
-   session. Unsafe methods also require a matching CSRF cookie and header.
+5. Every API except the CSRF, session-probe, and login endpoints requires the
+   server-side session. Unsafe methods also require a matching CSRF cookie and header.
 6. Logout invalidates the server-side session and expires both cookies.
 
 The Next.js route guard only improves navigation UX. A cookie's presence is not
-treated as proof of authentication; `GET /api/v1/auth/me` verifies the session,
-and the backend enforces access on every finance endpoint.
+treated as proof of authentication; `GET /api/v1/auth/session` verifies the
+session before protected screens render, and the backend enforces access on
+every finance endpoint. The probe answers `200` either way, so a stale cookie
+left behind by a backend restart redirects to login without a browser-console
+`401`.
 
 ## SQLite user schema
 
@@ -44,6 +47,7 @@ parent commit of this backend branch, so Flyway applies both features in order.
 | --- | --- | --- | --- |
 | `GET` | `/api/v1/auth/csrf` | Public | Sets `XSRF-TOKEN` and returns `{ "token": "..." }` |
 | `POST` | `/api/v1/auth/login` | Public + CSRF | Accepts `{ "email": "...", "password": "..." }` |
+| `GET` | `/api/v1/auth/session` | Public | Returns `{ "authenticated": true, "user": { "id": 1, "email": "..." } }` or `{ "authenticated": false, "user": null }` |
 | `GET` | `/api/v1/auth/me` | Session | Returns `{ "id": 1, "email": "..." }` |
 | `POST` | `/api/v1/auth/logout` | Session + CSRF | Invalidates the session; returns `204` |
 
@@ -105,6 +109,7 @@ homelab instance.
 ## Verification
 
 `mvn clean verify` covers the migration and hash, successful and failed login,
-session restoration, unauthenticated endpoint rejection, CSRF enforcement,
+session restoration, the public session probe, an import persisted across
+logout and login, unauthenticated endpoint rejection, CSRF enforcement,
 logout invalidation, and login throttling. Tests use temporary SQLite files and
 never read or modify the runtime database.

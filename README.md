@@ -6,11 +6,11 @@ SQLite, Flyway, and Spring Data JPA.
 ## Project status
 
 Working today: SQLite-backed email/password authentication, hardened server-side
-sessions, TD credit-card statement upload and parsing, SHA-256 duplicate
-detection, automatic expense-type/category suggestions, single and batched
-transaction persistence, duplicate resolution, transaction filtering, and
-account/category lookups. 237 tests pass under
-`mvn clean verify`.
+sessions, account creation, TD credit-card statement upload and parsing, SHA-256
+duplicate detection, automatic expense-type/category suggestions, single and
+batched transaction persistence, duplicate resolution, transaction filtering,
+and account/category lookups. 243 tests pass under `mvn clean verify`, and the
+build, test run, and application startup emit no warnings on Java 21 through 26.
 
 The companion UI lives in the separate [afinco_frontend](https://github.com/viniciusmioto/afinco_frontend)
 repository.
@@ -19,14 +19,11 @@ repository.
 
 Ordered roughly by how much each one blocks real use.
 
-1. **Account creation — blocking.** The `accounts` table has no Flyway seed row
-   and no write endpoint, so a fresh database returns `[]` from
-   `GET /api/v1/accounts` and *no imported transaction can be saved at all*.
-   `POST /api/v1/accounts` (and ideally update/delete) is the next thing to
-   build.
-2. **Analytics endpoints.** `TransactionRepository.aggregateConfirmedByCategory`
+1. **Analytics endpoints.** `TransactionRepository.aggregateConfirmedByCategory`
    is written and indexed but no service or controller exposes it, so the
    planned dashboards have no data source. This query is currently dead code.
+2. **Account maintenance.** `POST /api/v1/accounts` creates an account, but
+   there is no update or delete endpoint yet.
 3. **Checking-account parser.** `StatementType.CHECKING_ACCOUNT` is accepted and
    validated but `StatementParserFactory` has no strategy for it, so those
    uploads return `422`. Rows from it are meant to be typed `DEBIT`.
@@ -38,11 +35,9 @@ Ordered roughly by how much each one blocks real use.
 6. **Transaction editing.** Only create, batch-create, resolve-duplicate, and
    delete exist. There is no `PUT`/`PATCH`, so correcting a wrong category or
    amount means deleting and re-creating the row.
-7. **Unmapped paths return `500`.** `GlobalExceptionHandler`'s
-   `@ExceptionHandler(Exception.class)` catch-all swallows Spring's
-   no-handler-found exception, so a typo'd URL reports
-   `500 "An unexpected error occurred"` instead of `404`. This is a real defect
-   and makes client-side debugging misleading.
+7. **Password management.** The seeded `test@test.com` credential can only be
+   rotated by editing SQLite; there is no change-password or user-management
+   endpoint.
 8. **Scanned and encrypted PDFs.** OCR is not implemented, and statements that
    require a password to open are rejected. Owner-encrypted PDFs that open
    without a password and allow text extraction do work.
@@ -54,6 +49,7 @@ operations initialize CSRF protection and establish the session; the current
 user and logout operations require it:
 
 - `GET /api/v1/auth/csrf`
+- `GET /api/v1/auth/session` (public; reports whether the caller is signed in)
 - `POST /api/v1/auth/login`
 - `GET /api/v1/auth/me`
 - `POST /api/v1/auth/logout`
@@ -85,9 +81,24 @@ docker compose down
 Add `--volumes` only when you intentionally want to delete all local Afinco
 database data.
 
+## Run locally
+
+```shell
+mvn spring-boot:run
+```
+
+The API listens on `http://localhost:8080` and creates `./afinco.db` on first
+start. Set `AFINCO_DATABASE_PATH` to use another file and `SERVER_PORT` to use
+another port. Stop any `afinco-backend` Docker container first, because both
+bind port 8080.
+
 ## Run tests locally
 
 Java 21 or newer and Maven 3.9+ are required. Maven compiles with Java 21 bytecode.
+On Java 24+ the `jdk24-plus` profile activates automatically and forks `javac`
+so Lombok's `sun.misc.Unsafe` access does not print warnings; Mockito loads as a
+startup agent and SQLite native access is enabled for tests, `spring-boot:run`,
+and the executable JAR.
 
 ```shell
 mvn clean verify
@@ -112,15 +123,23 @@ The API is available under `/api/v1/transactions`:
 - `DELETE /api/v1/transactions/{id}` removes a transaction, including a pending
   duplicate the user chooses to ignore.
 
-Two read-only lookup endpoints back the review screens, which must know real
-database identifiers before they can build a transaction payload:
+Reference endpoints back the review screens, which must know real database
+identifiers before they can build a transaction payload:
 
 - `GET /api/v1/accounts` lists accounts ordered by bank name, then ID.
+- `POST /api/v1/accounts` creates an account from
+  `{ "bankName": "TD Bank", "accountNumberLast4": "1234", "currency": "CAD" }`
+  and returns `201` with a `Location` header. Only the last four digits are
+  stored; the currency is upper-cased. Invalid fields return `400` with
+  field-level `validationErrors`.
 - `GET /api/v1/categories` lists categories ordered by name.
 
-Both return plain JSON arrays. Accounts have no seed data and no create endpoint
-yet, so a fresh database returns `[]` here and reviewed rows cannot be saved
-until an account row exists.
+The list endpoints return plain JSON arrays. Accounts have no seed data, so a
+fresh database returns `[]`; the frontend import screen then offers an inline
+form that calls `POST /api/v1/accounts` before saving.
+
+Unknown API routes return a structured `404`, and an unsupported HTTP method on
+a known route returns `405`, instead of falling through to the generic `500`.
 
 ## Reviewed batch persistence
 

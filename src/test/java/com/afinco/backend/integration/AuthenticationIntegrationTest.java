@@ -55,6 +55,34 @@ class AuthenticationIntegrationTest {
     }
 
     @Test
+    void reportsSessionStateWithoutRequiringAuthentication() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/session"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.authenticated").value(false))
+                .andExpect(jsonPath("$.user").isEmpty());
+
+        LoginContext login = login("test@test.com", "123@Test");
+        mockMvc.perform(get("/api/v1/auth/session").session(login.session()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.authenticated").value(true))
+                .andExpect(jsonPath("$.user.email").value("test@test.com"));
+    }
+
+    @Test
+    void returnsStructuredErrorsForUnknownRoutesAndMethods() throws Exception {
+        LoginContext login = login("test@test.com", "123@Test");
+
+        mockMvc.perform(get("/api/v1/does-not-exist").session(login.session()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("The requested API route does not exist"));
+
+        mockMvc.perform(get("/api/v1/transactions/batch").session(login.session()))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.message").value("The HTTP method is not supported for this route"));
+    }
+
+    @Test
     void rejectsInvalidCredentialsWithoutRevealingWhichFieldWasWrong() throws Exception {
         CsrfContext csrf = csrf();
 
@@ -97,6 +125,54 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(get("/api/v1/auth/me").session(login.session()))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void persistsAnImportedBatchAcrossLogoutAndLogin() throws Exception {
+        LoginContext firstSession = login("test@test.com", "123@Test");
+        CsrfContext csrf = csrf(firstSession.session());
+
+        MvcResult accountResult = mockMvc.perform(post("/api/v1/accounts")
+                        .session(firstSession.session())
+                        .cookie(csrf.cookie())
+                        .header("X-XSRF-TOKEN", csrf.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bankName\":\"TD Bank\",\"accountNumberLast4\":\"1234\",\"currency\":\"cad\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.currency").value("CAD"))
+                .andReturn();
+        long accountId = objectMapper.readTree(accountResult.getResponse().getContentAsString()).path("id").asLong();
+        long categoryId = objectMapper.readTree(mockMvc.perform(get("/api/v1/categories").session(firstSession.session()))
+                        .andExpect(status().isOk())
+                        .andReturn().getResponse().getContentAsString())
+                .path(0).path("id").asLong();
+
+        mockMvc.perform(post("/api/v1/transactions/batch")
+                        .session(firstSession.session())
+                        .cookie(csrf.cookie())
+                        .header("X-XSRF-TOKEN", csrf.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"accountId": %d, "transactions": [
+                                  {"categoryId": %d, "date": "2026-02-12", "amount": 7.00, "type": "CREDIT",
+                                   "description": "CHRONO-RECHARGE OPUS MONTREAL", "forceDuplicate": false}
+                                ]}
+                                """.formatted(accountId, categoryId)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.savedCount").value(1));
+
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .session(firstSession.session())
+                        .cookie(csrf.cookie())
+                        .header("X-XSRF-TOKEN", csrf.token()))
+                .andExpect(status().isNoContent());
+
+        LoginContext secondSession = login("test@test.com", "123@Test");
+        mockMvc.perform(get("/api/v1/transactions").session(secondSession.session()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].description").value("CHRONO-RECHARGE OPUS MONTREAL"))
+                .andExpect(jsonPath("$.content[0].account.accountNumberLast4").value("1234"));
     }
 
     private LoginContext login(String email, String password) throws Exception {
