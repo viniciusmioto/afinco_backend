@@ -12,8 +12,8 @@ public interface TransactionService {
 
     PageResponse<TransactionResponse> findTransactions(TransactionFilterRequest filters);
 
-    /** Calendar months that contain at least one transaction, newest first. */
-    List<TransactionMonthResponse> findMonths();
+    /** Calendar months that contain at least one transaction of the bank (every bank when null), newest first. */
+    List<TransactionMonthResponse> findMonths(String bankName);
 
     TransactionResponse create(TransactionCreateRequest request);
 

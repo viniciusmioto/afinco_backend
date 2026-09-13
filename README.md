@@ -10,8 +10,9 @@ sessions, account creation, TD credit-card statement upload and parsing
 (including the statement period), SHA-256 duplicate detection, automatic
 expense-type/category suggestions, persisted statements that own their imported
 transactions, manual transactions, duplicate resolution, statement- and
-month-scoped transaction queries, a full transaction-data reset, and
-account/category lookups. 275 tests pass
+month-scoped transaction queries filtered by bank, spending analytics by month
+or statement, a full transaction-data reset, and account/category lookups.
+289 tests pass
 under `mvn clean verify`, and the build, test run, and application startup emit
 no warnings on Java 21 through 26.
 
@@ -22,30 +23,28 @@ repository.
 
 Ordered roughly by how much each one blocks real use.
 
-1. **Analytics endpoints.** `TransactionRepository.aggregateConfirmedByCategory`
-   is written and indexed but no service or controller exposes it, so the
-   planned dashboards have no data source. This query is currently dead code.
-2. **Account maintenance.** `POST /api/v1/accounts` creates an account, but
+1. **Account maintenance.** `POST /api/v1/accounts` creates an account, but
    there is no update or delete endpoint yet.
-3. **Single-statement deletion.** Everything can be reset at once (see
+2. **Single-statement deletion.** Everything can be reset at once (see
    **Transaction data reset**), but there is no `DELETE /api/v1/statements/{id}`
    to undo one import. Transactions and statements use `ON DELETE RESTRICT`, so
    this needs a service that removes that statement's rows first.
-4. **Checking-account parser.** `StatementType.CHECKING_ACCOUNT` is accepted and
+3. **Checking-account parser.** `StatementType.CHECKING_ACCOUNT` is accepted and
    validated but `StatementParserFactory` has no strategy for it, so those
    uploads return `422`. Rows from it are meant to be typed `DEBIT`.
-5. **RBC parser.** The factory registers TD only. RBC was intended as the second
+4. **RBC parser.** The factory registers TD only. RBC was intended as the second
    supported institution.
-6. **Category management.** The ten current categories are evolved and seeded by
-   `V2__categorization_model.sql` and can only be changed by editing the
+5. **Category management.** The ten current categories are evolved and seeded by
+   `V2__categorization_model.sql` (V5 renames "Phone / Internet" to
+   "Phone & Internet") and can only be changed by editing the
    database. Custom user categories need create/update/delete endpoints.
-7. **Transaction editing.** Only create, statement import, resolve-duplicate,
+6. **Transaction editing.** Only create, statement import, resolve-duplicate,
    and delete exist. There is no `PUT`/`PATCH`, so correcting a wrong category or
    amount means deleting and re-creating the row.
-8. **Password management.** The seeded `test@test.com` credential can only be
+7. **Password management.** The seeded `test@test.com` credential can only be
    rotated by editing SQLite; there is no change-password or user-management
    endpoint.
-9. **Scanned and encrypted PDFs.** OCR is not implemented, and statements that
+8. **Scanned and encrypted PDFs.** OCR is not implemented, and statements that
    require a password to open are rejected. Owner-encrypted PDFs that open
    without a password and allow text extraction do work.
 
@@ -118,13 +117,15 @@ Tests use a temporary SQLite database and never touch `./afinco.db`.
 The API is available under `/api/v1/transactions`:
 
 - `GET /api/v1/transactions` supports `statementId`, `startDate`, `endDate`,
-  `accountId`, `categoryId`, `type`, `status`, `page`, and `size` filters.
+  `accountId`, `bankName`, `categoryId`, `type`, `status`, `page`, and `size`
+  filters. A blank `bankName` means every bank.
   Results default to 20 items (maximum 500, enough for a whole statement or
   month) and are ordered by transaction date and ID, newest first. Every item
   includes `statement` (`id`, `statementType`, `periodStart`, `periodEnd`), or
   `null` for a manual entry.
 - `GET /api/v1/transactions/months` lists the calendar months that contain
   transactions, newest first, as `[{ "month": "2026-07", "transactionCount": 40 }]`.
+  The optional `bankName` limits the counts to one bank.
 - `POST /api/v1/transactions` creates a transaction. An existing SHA-256
   signature automatically produces the `DUPLICATE_PENDING` status. The server
   calculates the signature; the optional legacy `hashSignature` input is ignored.
@@ -150,6 +151,45 @@ form that calls `POST /api/v1/accounts` before saving.
 
 Unknown API routes return a structured `404`, and an unsupported HTTP method on
 a known route returns `405`, instead of falling through to the generic `500`.
+
+## Spending analytics
+
+`GET /api/v1/analytics/spending` powers the frontend Overview. It returns
+confirmed spending per category per period, oldest period first:
+
+- `groupBy=MONTH` (default) returns every calendar month from the first to the
+  last month with spending or statement coverage, including months without
+  spending. The optional `bankName` limits it to one bank; without it every bank
+  is combined.
+- `groupBy=STATEMENT` returns one period per imported statement and requires a
+  `bankName` (`400` otherwise), because statements belong to one bank.
+
+```json
+{
+  "groupBy": "MONTH",
+  "bankName": null,
+  "categories": [{ "id": 3, "name": "Rent", "expenseType": "FIXED", "colorCode": "#4F46E5" }],
+  "periods": [
+    {
+      "key": "2026-07",
+      "startDate": "2026-07-01",
+      "endDate": "2026-07-31",
+      "statement": null,
+      "complete": true,
+      "categories": [{ "categoryId": 3, "amount": 1450.00, "transactionCount": 1 }]
+    }
+  ]
+}
+```
+
+Payment categories and their rows are excluded (they move money rather than
+spend it), as are `DUPLICATE_PENDING` rows. `complete` is `false` when imported
+data covers only part of a period: a month that an account's statements do not
+fully cover, a month without statements that has not ended, or a statement
+shorter than 28 days (such as a card's first). Clients should leave incomplete
+periods out of averages. Amounts are summed per day or statement in SQL and
+rounded to cents in Java. The older `aggregateConfirmedByCategory` repository
+query is still unused.
 
 ## Transaction data reset
 

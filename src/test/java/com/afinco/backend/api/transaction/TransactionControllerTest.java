@@ -69,6 +69,7 @@ class TransactionControllerTest {
                         .param("endDate", "2026-09-30")
                         .param("statementId", "3")
                         .param("accountId", "1")
+                        .param("bankName", "TD Bank")
                         .param("categoryId", "2")
                         .param("type", "DEBIT")
                         .param("status", "CONFIRMED")
@@ -86,6 +87,7 @@ class TransactionControllerTest {
         verify(transactionService).findTransactions(captor.capture());
         assertThat(captor.getValue().statementId()).isEqualTo(3L);
         assertThat(captor.getValue().accountId()).isEqualTo(1L);
+        assertThat(captor.getValue().resolvedBankName()).isEqualTo("TD Bank");
         assertThat(captor.getValue().type()).isEqualTo(TransactionType.DEBIT);
         assertThat(captor.getValue().resolvedSize()).isEqualTo(10);
     }
@@ -104,11 +106,11 @@ class TransactionControllerTest {
 
     @Test
     void listsMonthsThatContainTransactions() throws Exception {
-        when(transactionService.findMonths()).thenReturn(List.of(
+        when(transactionService.findMonths("TD Bank")).thenReturn(List.of(
                 new TransactionMonthResponse(YearMonth.of(2026, 3), 41),
                 new TransactionMonthResponse(YearMonth.of(2026, 2), 12)));
 
-        mockMvc.perform(get("/api/v1/transactions/months"))
+        mockMvc.perform(get("/api/v1/transactions/months").param("bankName", "TD Bank"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].month").value("2026-03"))
                 .andExpect(jsonPath("$[0].transactionCount").value(41))

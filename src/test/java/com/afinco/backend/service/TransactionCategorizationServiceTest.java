@@ -82,7 +82,7 @@ class TransactionCategorizationServiceTest {
             Categorization result = service.categorize(description);
 
             assertThat(result.expenseType()).isEqualTo(ExpenseType.FIXED);
-            assertThat(result.categoryName()).isEqualTo("Phone / Internet");
+            assertThat(result.categoryName()).isEqualTo("Phone & Internet");
         }
     }
 

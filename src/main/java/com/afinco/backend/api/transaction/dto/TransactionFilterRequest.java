@@ -6,14 +6,17 @@ import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import java.time.LocalDate;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.util.StringUtils;
 
 public record TransactionFilterRequest(
         @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
         @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
         @Positive Long statementId,
         @Positive Long accountId,
+        @Size(max = 100) String bankName,
         @Positive Long categoryId,
         TransactionType type,
         TransactionStatus status,
@@ -32,6 +35,11 @@ public record TransactionFilterRequest(
 
     public int resolvedSize() {
         return size == null ? DEFAULT_SIZE : size;
+    }
+
+    /** A blank bank name means "all banks". */
+    public String resolvedBankName() {
+        return StringUtils.hasText(bankName) ? bankName.trim() : null;
     }
 
     @AssertTrue(message = "startDate must not be after endDate")

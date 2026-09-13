@@ -32,4 +32,14 @@ public interface StatementRepository extends JpaRepository<Statement, Long> {
             ORDER BY statement.period.endDate DESC, statement.id DESC
             """)
     List<Statement> findAllNewestFirst();
+
+    /** Statements of one bank (every bank when null), oldest billing period first. */
+    @Query("""
+            SELECT statement
+            FROM Statement statement
+            JOIN FETCH statement.account account
+            WHERE (:bankName IS NULL OR account.bankName = :bankName)
+            ORDER BY statement.period.endDate ASC, statement.id ASC
+            """)
+    List<Statement> findAllForBankOldestFirst(@Param("bankName") String bankName);
 }

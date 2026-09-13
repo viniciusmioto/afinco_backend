@@ -9,6 +9,7 @@ import com.afinco.backend.api.transaction.dto.TransactionResponse;
 import com.afinco.backend.service.TransactionService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import java.net.URI;
 import java.util.List;
 import org.springframework.http.ResponseEntity;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @Validated
@@ -40,8 +42,9 @@ public class TransactionController {
     }
 
     @GetMapping("/months")
-    public List<TransactionMonthResponse> findMonths() {
-        return transactionService.findMonths();
+    public List<TransactionMonthResponse> findMonths(
+            @RequestParam(required = false) @Size(max = 100) String bankName) {
+        return transactionService.findMonths(bankName);
     }
 
     @PostMapping({"", "/"})

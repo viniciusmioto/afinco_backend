@@ -115,11 +115,11 @@ class StatementWorkflowIntegrationTest {
                 .satisfies(statement -> assertThat(statement.transactionCount()).isEqualTo(3));
 
         var scoped = transactions.findTransactions(new TransactionFilterRequest(
-                null, null, first.statement().id(), null, null, null, null, null, 500));
+                null, null, first.statement().id(), null, null, null, null, null, null, 500));
         assertThat(scoped.totalElements()).isEqualTo(3);
         assertThat(scoped.content()).allSatisfy(row ->
                 assertThat(row.statement().id()).isEqualTo(first.statement().id()));
-        assertThat(transactions.findMonths()).extracting(month -> month.month())
+        assertThat(transactions.findMonths(null)).extracting(month -> month.month())
                 .containsExactly(YearMonth.of(2026, 1), YearMonth.of(2025, 12));
     }
 

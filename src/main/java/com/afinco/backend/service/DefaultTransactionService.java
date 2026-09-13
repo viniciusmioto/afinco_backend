@@ -28,6 +28,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 @Service
 @Transactional(readOnly = true)
@@ -64,6 +65,7 @@ public class DefaultTransactionService implements TransactionService {
                 filters.endDate(),
                 filters.statementId(),
                 filters.accountId(),
+                filters.resolvedBankName(),
                 filters.categoryId(),
                 filters.type(),
                 filters.status(),
@@ -72,9 +74,10 @@ public class DefaultTransactionService implements TransactionService {
     }
 
     @Override
-    public List<TransactionMonthResponse> findMonths() {
+    public List<TransactionMonthResponse> findMonths(String bankName) {
         Map<YearMonth, Long> counts = new TreeMap<>(Comparator.reverseOrder());
-        for (DailyTransactionCount day : transactionRepository.countByDate()) {
+        String bank = StringUtils.hasText(bankName) ? bankName.trim() : null;
+        for (DailyTransactionCount day : transactionRepository.countByDate(bank)) {
             counts.merge(YearMonth.from(day.getDate()), day.getTransactionCount(), Long::sum);
         }
         return counts.entrySet().stream()

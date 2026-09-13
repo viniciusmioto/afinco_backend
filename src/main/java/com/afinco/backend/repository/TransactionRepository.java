@@ -4,7 +4,9 @@ import com.afinco.backend.domain.Transaction;
 import com.afinco.backend.domain.TransactionStatus;
 import com.afinco.backend.domain.TransactionType;
 import com.afinco.backend.repository.projection.CategoryAggregation;
+import com.afinco.backend.repository.projection.DailyCategorySpending;
 import com.afinco.backend.repository.projection.DailyTransactionCount;
+import com.afinco.backend.repository.projection.StatementCategorySpending;
 import com.afinco.backend.repository.projection.StatementTransactionCount;
 import java.time.LocalDate;
 import java.util.Collection;
@@ -34,6 +36,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
                       AND (:endDate IS NULL OR tx.date <= :endDate)
                       AND (:statementId IS NULL OR statement.id = :statementId)
                       AND (:accountId IS NULL OR account.id = :accountId)
+                      AND (:bankName IS NULL OR account.bankName = :bankName)
                       AND (:categoryId IS NULL OR category.id = :categoryId)
                       AND (:type IS NULL OR tx.type = :type)
                       AND (:status IS NULL OR tx.status = :status)
@@ -46,6 +49,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
                       AND (:endDate IS NULL OR tx.date <= :endDate)
                       AND (:statementId IS NULL OR statement.id = :statementId)
                       AND (:accountId IS NULL OR tx.account.id = :accountId)
+                      AND (:bankName IS NULL OR tx.account.bankName = :bankName)
                       AND (:categoryId IS NULL OR tx.category.id = :categoryId)
                       AND (:type IS NULL OR tx.type = :type)
                       AND (:status IS NULL OR tx.status = :status)
@@ -55,6 +59,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             @Param("endDate") LocalDate endDate,
             @Param("statementId") Long statementId,
             @Param("accountId") Long accountId,
+            @Param("bankName") String bankName,
             @Param("categoryId") Long categoryId,
             @Param("type") TransactionType type,
             @Param("status") TransactionStatus status,
@@ -70,9 +75,17 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             """)
     List<StatementTransactionCount> countByStatement();
 
-    /** Per-day counts stay small (at most one row per calendar day) and are grouped into months in Java. */
-    @Query("SELECT tx.date AS date, COUNT(tx) AS transactionCount FROM Transaction tx GROUP BY tx.date")
-    List<DailyTransactionCount> countByDate();
+    /**
+     * Per-day counts stay small (at most one row per calendar day) and are grouped into months in Java.
+     * A null bank name counts every bank.
+     */
+    @Query("""
+            SELECT tx.date AS date, COUNT(tx) AS transactionCount
+            FROM Transaction tx
+            WHERE (:bankName IS NULL OR tx.account.bankName = :bankName)
+            GROUP BY tx.date
+            """)
+    List<DailyTransactionCount> countByDate(@Param("bankName") String bankName);
 
     @Query("""
             SELECT category.id AS categoryId,
@@ -95,4 +108,40 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             @Param("endDate") LocalDate endDate,
             @Param("accountId") Long accountId,
             @Param("type") TransactionType type);
+
+    /**
+     * Confirmed non-payment spending per day and category, grouped into months in Java (SQLite has no
+     * portable JPQL month function). A null bank name includes every bank.
+     */
+    @Query("""
+            SELECT tx.date AS date,
+                   category.id AS categoryId,
+                   SUM(tx.amount) AS totalAmount,
+                   COUNT(tx) AS transactionCount
+            FROM Transaction tx
+            JOIN tx.category category
+            JOIN tx.account account
+            WHERE tx.status = com.afinco.backend.domain.TransactionStatus.CONFIRMED
+              AND category.expenseType <> com.afinco.backend.domain.ExpenseType.PAYMENT
+              AND (:bankName IS NULL OR account.bankName = :bankName)
+            GROUP BY tx.date, category.id
+            """)
+    List<DailyCategorySpending> sumSpendingByDateAndCategory(@Param("bankName") String bankName);
+
+    /** Confirmed non-payment spending per statement and category. Manual entries have no statement. */
+    @Query("""
+            SELECT statement.id AS statementId,
+                   category.id AS categoryId,
+                   SUM(tx.amount) AS totalAmount,
+                   COUNT(tx) AS transactionCount
+            FROM Transaction tx
+            JOIN tx.statement statement
+            JOIN tx.category category
+            JOIN tx.account account
+            WHERE tx.status = com.afinco.backend.domain.TransactionStatus.CONFIRMED
+              AND category.expenseType <> com.afinco.backend.domain.ExpenseType.PAYMENT
+              AND (:bankName IS NULL OR account.bankName = :bankName)
+            GROUP BY statement.id, category.id
+            """)
+    List<StatementCategorySpending> sumSpendingByStatementAndCategory(@Param("bankName") String bankName);
 }

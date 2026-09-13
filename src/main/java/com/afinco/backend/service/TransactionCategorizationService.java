@@ -198,7 +198,7 @@ public class TransactionCategorizationService {
         }
 
         if (containsAny(upper, PHONE_INTERNET_KEYWORDS)) {
-            return new Categorization(ExpenseType.FIXED, "Phone / Internet");
+            return new Categorization(ExpenseType.FIXED, "Phone & Internet");
         }
 
         if (containsAny(upper, TRANSPORT_KEYWORDS)) {

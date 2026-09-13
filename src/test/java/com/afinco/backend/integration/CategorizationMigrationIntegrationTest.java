@@ -70,4 +70,56 @@ class CategorizationMigrationIntegrationTest {
                 .as("pre-statement transactions survive V4 without a statement")
                 .isEqualTo(1);
     }
+
+    @Test
+    void renamesPhoneInternetInPlaceSoItsTransactionsFollow() {
+        SQLiteDataSource dataSource = dataSource("phone-rename.db");
+        migrate(dataSource, "4");
+
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        Long categoryId = jdbc.queryForObject(
+                "SELECT id FROM categories WHERE name = 'Phone / Internet'", Long.class);
+        jdbc.update("""
+                INSERT INTO accounts (bank_name, account_number_last4, currency)
+                VALUES ('TD Bank', '1234', 'CAD')
+                """);
+        jdbc.update("""
+                INSERT INTO transactions (
+                    account_id, category_id, date, amount, type, description,
+                    hash_signature, status
+                )
+                VALUES (1, ?, '2026-07-02', 40.24, 'CREDIT', 'VESTA *CHATR', ?, 'CONFIRMED')
+                """, categoryId, "b".repeat(64));
+
+        migrate(dataSource, null);
+
+        assertThat(jdbc.queryForObject("""
+                SELECT categories.name
+                FROM transactions
+                JOIN categories ON categories.id = transactions.category_id
+                """, String.class)).isEqualTo("Phone & Internet");
+        assertThat(jdbc.queryForObject(
+                "SELECT id FROM categories WHERE name = 'Phone & Internet'", Long.class)).isEqualTo(categoryId);
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM categories WHERE name = 'Phone / Internet'", Integer.class)).isZero();
+    }
+
+    private SQLiteDataSource dataSource(String fileName) {
+        SQLiteConfig sqliteConfig = new SQLiteConfig();
+        sqliteConfig.enforceForeignKeys(true);
+        SQLiteDataSource dataSource = new SQLiteDataSource(sqliteConfig);
+        dataSource.setUrl("jdbc:sqlite:" + databaseDirectory.resolve(fileName));
+        return dataSource;
+    }
+
+    /** Migrates up to {@code targetVersion}, or to the latest migration when it is null. */
+    private void migrate(SQLiteDataSource dataSource, String targetVersion) {
+        var configuration = Flyway.configure()
+                .dataSource(dataSource)
+                .locations("classpath:db/migration");
+        if (targetVersion != null) {
+            configuration.target(MigrationVersion.fromVersion(targetVersion));
+        }
+        configuration.load().migrate();
+    }
 }

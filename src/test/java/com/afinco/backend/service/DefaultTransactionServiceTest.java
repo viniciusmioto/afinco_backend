@@ -82,6 +82,7 @@ class DefaultTransactionServiceTest {
                 LocalDate.of(2026, 9, 30),
                 3L,
                 1L,
+                " TD Bank ",
                 2L,
                 TransactionType.DEBIT,
                 TransactionStatus.CONFIRMED,
@@ -94,6 +95,7 @@ class DefaultTransactionServiceTest {
                         eq(filters.endDate()),
                         eq(filters.statementId()),
                         eq(filters.accountId()),
+                        eq("TD Bank"),
                         eq(filters.categoryId()),
                         eq(filters.type()),
                         eq(filters.status()),
@@ -109,6 +111,7 @@ class DefaultTransactionServiceTest {
                 eq(filters.endDate()),
                 eq(filters.statementId()),
                 eq(filters.accountId()),
+                eq("TD Bank"),
                 eq(filters.categoryId()),
                 eq(filters.type()),
                 eq(filters.status()),
@@ -120,13 +123,13 @@ class DefaultTransactionServiceTest {
 
     @Test
     void groupsDailyCountsIntoCalendarMonthsNewestFirst() {
-        when(transactionRepository.countByDate()).thenReturn(List.of(
+        when(transactionRepository.countByDate(null)).thenReturn(List.of(
                 day(LocalDate.of(2026, 2, 13), 2),
                 day(LocalDate.of(2026, 3, 1), 5),
                 day(LocalDate.of(2026, 2, 3), 1),
                 day(LocalDate.of(2025, 12, 31), 4)));
 
-        assertThat(service.findMonths()).containsExactly(
+        assertThat(service.findMonths("  ")).containsExactly(
                 new TransactionMonthResponse(YearMonth.of(2026, 3), 5),
                 new TransactionMonthResponse(YearMonth.of(2026, 2), 3),
                 new TransactionMonthResponse(YearMonth.of(2025, 12), 4));

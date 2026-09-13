@@ -111,7 +111,7 @@ class DatabaseIntegrationTest {
         assertThat(categories).containsExactlyInAnyOrderEntriesOf(Map.ofEntries(
                 Map.entry("Payment", "PAYMENT"),
                 Map.entry("Subscriptions", "FIXED"),
-                Map.entry("Phone / Internet", "FIXED"),
+                Map.entry("Phone & Internet", "FIXED"),
                 Map.entry("Transport", "FIXED"),
                 Map.entry("Rent", "FIXED"),
                 Map.entry("Groceries", "VARIABLE"),
@@ -178,6 +178,7 @@ class DatabaseIntegrationTest {
                 LocalDate.of(2026, 9, 30),
                 null,
                 selectedAccount.getId(),
+                null,
                 groceries.getId(),
                 TransactionType.DEBIT,
                 TransactionStatus.CONFIRMED,
@@ -195,13 +196,24 @@ class DatabaseIntegrationTest {
                 null,
                 null,
                 null,
+                null,
                 PageRequest.of(0, 10));
+        Page<Transaction> otherBank = transactionRepository.findAllMatchingFilters(
+                null, null, null, null, "RBC", null, null, null, PageRequest.of(0, 10));
 
         assertThat(filtered.getContent())
                 .singleElement()
                 .extracting(Transaction::getAmount)
                 .isEqualTo(new BigDecimal("42.35"));
         assertThat(unfiltered.getTotalElements()).isEqualTo(4);
+        assertThat(otherBank.getContent())
+                .singleElement()
+                .extracting(Transaction::getAmount)
+                .isEqualTo(new BigDecimal("99.00"));
+        assertThat(transactionRepository.countByDate("RBC"))
+                .singleElement()
+                .extracting(DailyTransactionCount::getTransactionCount)
+                .isEqualTo(1L);
         assertThat(aggregation).hasSize(2);
         assertThat(aggregation.getFirst().getCategoryName()).isEqualTo("Groceries");
         assertThat(aggregation.getFirst().getTotalAmount()).isEqualByComparingTo("42.35");
@@ -227,9 +239,9 @@ class DatabaseIntegrationTest {
         entityManager.clear();
 
         Page<Transaction> scoped = transactionRepository.findAllMatchingFilters(
-                null, null, statement.getId(), null, null, null, null, PageRequest.of(0, 10));
+                null, null, statement.getId(), null, null, null, null, null, PageRequest.of(0, 10));
         Page<Transaction> february2026 = transactionRepository.findAllMatchingFilters(
-                LocalDate.of(2026, 2, 1), LocalDate.of(2026, 2, 28), null, null, null, null, null,
+                LocalDate.of(2026, 2, 1), LocalDate.of(2026, 2, 28), null, null, null, null, null, null,
                 PageRequest.of(0, 10));
 
         assertThat(scoped.getContent()).extracting(Transaction::getDescription)
@@ -250,7 +262,7 @@ class DatabaseIntegrationTest {
                 .singleElement()
                 .extracting(StatementTransactionCount::getTransactionCount)
                 .isEqualTo(2L);
-        assertThat(transactionRepository.countByDate())
+        assertThat(transactionRepository.countByDate(null))
                 .extracting(DailyTransactionCount::getDate)
                 .containsExactlyInAnyOrder(LocalDate.of(2026, 2, 5), LocalDate.of(2026, 1, 30), LocalDate.of(2026, 2, 7));
     }
